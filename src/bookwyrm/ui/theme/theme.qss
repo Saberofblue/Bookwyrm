@@ -1,0 +1,302 @@
+/* Bookwyrm theme. Words that start with an at-sign are filled in by theme.py from palette.py. */
+
+QWidget {
+    color: @silver_300;
+    font-family: "@body";
+    font-size: 15px;
+}
+QMainWindow, QDialog {
+    background: @stone_900;
+}
+QToolTip {
+    background: @stone_700;
+    color: @silver_100;
+    border: 1px solid @stone_500;
+    padding: 5px 8px;
+}
+
+/* ---- headings and text roles ---- */
+QLabel#heading {
+    font-family: "@display";
+    font-size: 22px;
+    letter-spacing: 1px;
+    color: @silver_100;
+}
+QLabel#subheading {
+    color: @silver_500;
+    font-style: italic;
+}
+QLabel#wordmark {
+    font-family: "@display";
+    font-size: 17px;
+    letter-spacing: 3px;
+    color: @silver_100;
+}
+QLabel#sectionLabel {
+    font-family: "@display";
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: @silver_500;
+}
+
+/* ---- menus ---- */
+QMenuBar {
+    background: @stone_900;
+}
+QMenuBar::item:selected {
+    background: @stone_600;
+}
+QMenu {
+    background: @stone_700;
+    border: 1px solid @stone_500;
+    padding: 5px;
+}
+QMenu::item {
+    padding: 5px 26px 5px 14px;
+    border-radius: 4px;
+}
+QMenu::item:selected {
+    background: @frost_700;
+    color: @silver_100;
+}
+QMenu::item:disabled {
+    color: @silver_700;
+}
+QMenu::separator {
+    height: 1px;
+    background: @stone_500;
+    margin: 5px 8px;
+}
+
+/* ---- tabs: one per open tome ---- */
+QTabWidget::pane {
+    border: none;
+    border-top: 1px solid @stone_600;
+}
+QTabBar {
+    background: @stone_900;
+    qproperty-drawBase: 0;
+}
+QTabBar::tab {
+    background: transparent;
+    color: @silver_500;
+    padding: 8px 14px 8px 14px;
+    margin-top: 4px;
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-top-left-radius: 7px;
+    border-top-right-radius: 7px;
+    min-width: 90px;
+}
+QTabBar::tab:hover {
+    color: @silver_300;
+    background: @stone_800;
+}
+QTabBar::tab:selected {
+    color: @silver_100;
+    background: @stone_700;
+    border-color: @stone_500;
+}
+QTabBar::close-button {
+    subcontrol-position: right;
+    image: url("@assets/icons/close.svg");
+    width: 14px;
+    height: 14px;
+    margin-left: 6px;
+}
+QTabBar::close-button:hover {
+    image: url("@assets/icons/close-hover.svg");
+}
+
+/* the reader's side panel has three small tabs */
+QTabWidget#sidePanel QTabBar::tab {
+    min-width: 0;
+    padding: 6px 11px;
+    margin-top: 2px;
+    font-size: 14px;
+}
+QTabWidget#sidePanel::pane {
+    border-top: 1px solid @stone_600;
+    background: @stone_800;
+}
+QTabWidget#sidePanel {
+    background: @stone_800;
+}
+
+/* ---- sidebar ---- */
+QWidget#sidebar {
+    background: @stone_800;
+    border-right: 1px solid @stone_600;
+}
+QTreeView {
+    background: transparent;
+    border: none;
+    outline: none;
+    show-decoration-selected: 1;
+}
+QTreeView::item {
+    padding: 5px 4px;
+}
+QTreeView::item:hover, QTreeView::branch:hover {
+    background: @stone_700;
+}
+QTreeView::item:selected, QTreeView::branch:selected {
+    background: @frost_700;
+    color: @silver_100;
+}
+QTreeView::branch {
+    background: transparent;
+}
+QTreeView::branch:has-children:closed {
+    image: url("@assets/icons/chevron-right.svg");
+}
+QTreeView::branch:has-children:open {
+    image: url("@assets/icons/chevron-down.svg");
+}
+QListWidget, QListView {
+    background: @stone_800;
+    border: 1px solid @stone_600;
+    border-radius: 6px;
+    outline: none;
+}
+QListView::item {
+    padding: 4px 6px;
+}
+QListView::item:selected {
+    background: @frost_700;
+    color: @silver_100;
+}
+
+/* ---- buttons ---- */
+QPushButton {
+    background: @stone_700;
+    border: 1px solid @stone_500;
+    border-radius: 6px;
+    padding: 6px 16px;
+}
+QPushButton:hover {
+    background: @stone_600;
+    border-color: @silver_700;
+}
+QPushButton:pressed {
+    background: @stone_800;
+}
+QPushButton:disabled {
+    color: @silver_700;
+    border-color: @stone_600;
+}
+QPushButton:default, QPushButton#primary {
+    background: @frost_700;
+    border-color: @frost_500;
+    color: @silver_100;
+}
+QPushButton:default:hover, QPushButton#primary:hover {
+    background: #3a82aa;
+}
+QToolButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 4px 8px;
+}
+QToolButton:hover {
+    background: @stone_600;
+    border-color: @stone_500;
+}
+QToolButton:pressed, QToolButton:checked {
+    background: @frost_700;
+    color: @silver_100;
+}
+
+/* ---- inputs ---- */
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox {
+    background: @stone_900;
+    border: 1px solid @stone_500;
+    border-radius: 6px;
+    padding: 4px 8px;
+    selection-background-color: @frost_700;
+    selection-color: @silver_100;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QComboBox:focus {
+    border-color: @frost_500;
+}
+/* editors embedded in spin and combo boxes must not add a second frame */
+QSpinBox QLineEdit, QComboBox QLineEdit {
+    border: none;
+    padding: 0;
+    background: transparent;
+}
+/* Spin boxes show no steppers. (Qt's own "no buttons" switch collapses the text
+   field to one pixel once a stylesheet is applied, so they are zeroed here instead.) */
+QSpinBox::up-button, QSpinBox::down-button {
+    width: 0;
+    height: 0;
+    border: none;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+QComboBox QAbstractItemView {
+    background: @stone_700;
+    border: 1px solid @stone_500;
+    selection-background-color: @frost_700;
+}
+QRadioButton, QCheckBox {
+    spacing: 8px;
+}
+
+/* ---- reader ---- */
+QWidget#readerToolbar {
+    background: @stone_800;
+    border-bottom: 1px solid @stone_600;
+}
+
+/* ---- library header ---- */
+QWidget#libraryHeader {
+    background: @stone_800;
+    border-bottom: 1px solid @stone_600;
+}
+
+/* ---- status bar: the Librarian speaks here ---- */
+QStatusBar {
+    background: @stone_900;
+    border-top: 1px solid @stone_600;
+    color: @silver_500;
+    font-style: italic;
+}
+QStatusBar::item {
+    border: none;
+}
+
+/* ---- splitters and scrollbars ---- */
+QSplitter::handle {
+    background: @stone_600;
+}
+QSplitter::handle:horizontal {
+    width: 1px;
+}
+QScrollBar:vertical {
+    background: transparent;
+    width: 12px;
+    margin: 2px;
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 12px;
+    margin: 2px;
+}
+QScrollBar::handle {
+    background: @stone_500;
+    border-radius: 4px;
+    min-height: 36px;
+    min-width: 36px;
+}
+QScrollBar::handle:hover {
+    background: @silver_700;
+}
+QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {
+    background: transparent;
+    height: 0;
+    width: 0;
+}

@@ -1,0 +1,53 @@
+BOOKWYRM FOR WINDOWS
+A library, reader and editor for your PDFs, kept by a silver dragon.
+
+
+TO INSTALL
+
+1. Unzip this folder somewhere it can stay, such as Documents.
+   (Right-click the zip and choose "Extract All". Do not run it from inside the zip.)
+
+2. Open the unzipped folder and double-click "Install Bookwyrm".
+
+   - If Windows says "Windows protected your PC", click "More info", then
+     "Run anyway". Windows shows this for any program that is not from a
+     big publisher.
+   - If this PC does not have Python (the free language Bookwyrm is written
+     in), the installer offers to install it. Say yes.
+   - It then downloads about 110 MB, so it needs an internet connection and
+     5 to 10 minutes. Dots appear while it works. Nothing is installed
+     outside this folder apart from Python.
+
+3. When it finishes, Bookwyrm opens, and there is a Bookwyrm shortcut on your
+   Desktop and in the Start menu. Use that from now on.
+
+
+IF SOMETHING GOES WRONG
+
+You are the first person to try this version on Windows, so a hiccup is
+possible, and a report from you is exactly what is needed to fix it.
+
+- If the installer says it did not finish, send back the file "setup-log.txt"
+  from this folder.
+- If Bookwyrm installs but later misbehaves, send back "bookwyrm.log" from the
+  "Bookwyrm Library" folder inside your user folder (for example
+  C:\Users\YourName\Bookwyrm Library), with a line about what you were doing.
+
+Neither file contains anything from your PDFs.
+
+
+USING IT
+
+- Click "Add Tomes" to bring PDFs in. Bookwyrm keeps its own copies in
+  "Bookwyrm Library" in your user folder; your original files are never changed.
+- Organise them into Bookcases, Shelves and Sets, by dragging.
+- Double-click a tome to read it. The quill button opens the Scriptorium for
+  highlighting, notes, filling in forms and editing.
+- Hover over any button to see what it does and its keyboard shortcut.
+- Help > About lists everything Bookwyrm is built with.
+
+
+TO REMOVE IT
+
+Delete this folder and the two Bookwyrm shortcuts. If you also want the copies
+of your PDFs gone, delete the "Bookwyrm Library" folder in your user folder.
