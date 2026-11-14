@@ -32,6 +32,14 @@ jobs:
         run: python -m bookwyrm --self-test
       - name: Build
         run: python packaging/build.py --zip
+      - name: Run the built program's self-test
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          start /wait "" dist\Bookwyrm\Bookwyrm.exe --self-test "%RUNNER_TEMP%\exe-selftest.txt"
+          type "%RUNNER_TEMP%\exe-selftest.txt"
+          findstr /c:"RESULT: all" "%RUNNER_TEMP%\exe-selftest.txt"
+          dir /b dist\Bookwyrm
       - name: Make the Windows source package
         run: python packaging/make_windows_package.py
       - name: Install from the package the way a Windows user would

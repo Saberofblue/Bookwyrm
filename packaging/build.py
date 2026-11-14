@@ -54,6 +54,8 @@ def main() -> int:
     built = dist / ("Bookwyrm.app" if MAC else "Bookwyrm")
     if MAC:
         shutil.rmtree(dist / "Bookwyrm", ignore_errors=True)  # the loose folder beside the .app
+    if WINDOWS:  # a note for whoever receives the folder
+        shutil.copyfile(ROOT / "packaging" / "windows-readme.txt", built / "READ ME FIRST.txt")
     print(f"Built {built}")
     if "--zip" in sys.argv:
         name = "macos" if MAC else "windows" if WINDOWS else sys.platform
