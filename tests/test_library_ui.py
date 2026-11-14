@@ -167,8 +167,6 @@ def test_details_dialog_saves(qtbot, library):
 
 
 def test_window_opens_tomes_in_tabs_and_remembers_the_page(qtbot, library, monkeypatch):
-    monkeypatch.setattr("bookwyrm.ui.main_window.QSettings.value",
-                        lambda self, key, default=None, **_kw: default)
     book = add_book(library, 1, pdf=True)
     window = MainWindow(library)
     qtbot.addWidget(window)
@@ -208,9 +206,6 @@ def test_shortcut_hints_follow_the_platform(qapp):
 
 
 def test_removing_a_tome_closes_its_tabs_first(qtbot, library, monkeypatch):
-    for target in ("bookwyrm.ui.main_window.QSettings", "bookwyrm.ui.reader.reader_pane.QSettings"):
-        monkeypatch.setattr(f"{target}.value", lambda self, key, default=None, **_kw: default)
-        monkeypatch.setattr(f"{target}.setValue", lambda self, key, value: None)
     monkeypatch.setattr("bookwyrm.ui.library.library_page.dialogs.confirm", lambda *a: True)
     book = add_book(library, 1, pdf=True)
     window = MainWindow(library)

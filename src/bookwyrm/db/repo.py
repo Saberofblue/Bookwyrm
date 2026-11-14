@@ -153,6 +153,12 @@ class Library:
         self._listeners: list = []
 
     def close(self) -> None:
+        """Close the catalogue, folding its write-ahead log into the one database file
+        so the library folder is complete and safe to move or copy."""
+        try:
+            self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
         self.db.close()
 
     # -- change notification ------------------------------------------------
@@ -431,6 +437,16 @@ class Library:
             (book_id,),
         )
         return [r[0] for r in rows]
+
+    def labels_by_book(self) -> dict[int, list[str]]:
+        """Every tome's labels in one query, for filtering whole shelves."""
+        found: dict[int, list[str]] = {}
+        rows = self.db.execute(
+            """SELECT bl.book_id, l.name FROM book_labels bl JOIN labels l ON l.id = bl.label_id
+               ORDER BY l.name COLLATE NOCASE""")
+        for book_id, name in rows:
+            found.setdefault(book_id, []).append(name)
+        return found
 
     def all_labels(self) -> list[str]:
         rows = self.db.execute("SELECT name FROM labels ORDER BY name COLLATE NOCASE")

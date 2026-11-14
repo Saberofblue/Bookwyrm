@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, QSettings, Qt, QTimer
+from PySide6.QtCore import QEventLoop, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
 from bookwyrm.db.repo import Library
 from bookwyrm.library.importer import Importer
 from bookwyrm.pdf.session_client import DocumentSession
+from bookwyrm.ui import prefs
 from bookwyrm.ui.library.library_page import LibraryPage
 from bookwyrm.ui.reader.reader_pane import ReaderPane
 from bookwyrm.ui.theme import icons
@@ -59,9 +61,12 @@ class SessionPool:
 
 
 class MainWindow(QMainWindow):
+    libraryChangeRequested = Signal(str, str)  # folder, "move" | "switch"
+
     def __init__(self, library: Library):
         super().__init__()
         self.library = library
+        self._released = False  # True once the library has been let go of (closing or moving)
         self.settings = QSettings()
         self.importer = Importer(library, self)
         self.sessions = SessionPool(self)
@@ -95,6 +100,9 @@ class MainWindow(QMainWindow):
         self.library_page.openBookAt.connect(self.open_book_at)
         self.library_page.openRegion.connect(self.open_book_region)
         self.library_page.aboutToRemove.connect(self._close_book)
+        self.library_page.settingsRequested.connect(self.show_settings)
+        self.library_page.unsaved = lambda book_id: any(
+            pane.book_id == book_id and pane.session.dirty for pane in self._panes())
 
         self._dirty: set[ReaderPane] = set()
         self._save_timer = QTimer(self, singleShot=True, interval=800)
@@ -108,8 +116,45 @@ class MainWindow(QMainWindow):
 
     def _tidy_library(self) -> None:
         """Finish or clear away whatever an earlier session left half-done."""
+        if self._released:
+            return
         self.importer.resume()
         self.library.sweep()
+        self.restore_session()
+
+    # -- last session's tomes -------------------------------------------------------
+
+    def _save_session(self) -> None:
+        tomes = [{"book": pane.book_id, "side": 0 if self._group_of(pane) is self.left else 1}
+                 for pane in self._panes() if pane.book_id is not None]
+        current = self.current_pane()
+        self.settings.setValue("session/tomes", json.dumps(tomes))
+        self.settings.setValue("session/active",
+                               current.book_id if current is not None else None)
+        self.settings.setValue("session/library", str(self.library.root))
+
+    def restore_session(self) -> None:
+        """Reopen the tomes that were open when Bookwyrm last closed (a preference)."""
+        if not prefs.get("startup/reopen") or self._panes():
+            return
+        if self.settings.value("session/library") != str(self.library.root):
+            return
+        try:
+            tomes = json.loads(self.settings.value("session/tomes") or "[]")
+            active = self.settings.value("session/active")
+            active = int(active) if active not in (None, "", "None") else None
+        except (TypeError, ValueError):
+            return
+        for entry in tomes:
+            book = self.library.book(entry.get("book"))
+            if book is not None and book.ready and self.library.book_file(book).exists():
+                self.open_book(book.id, group=self.right if entry.get("side") else self.left)
+        for pane in self._panes():
+            if pane.book_id == active:
+                self._focus_pane(pane)
+                return
+        if tomes and active is None:
+            self.show_library()
 
     def _make_group(self) -> QTabWidget:
         group = QTabWidget(self)
@@ -130,6 +175,9 @@ class MainWindow(QMainWindow):
                   lambda: (self.show_library(), self.library_page.create_place("bookcase")))
         self._add(file_menu, "New Study &Table…", None,
                   lambda: (self.show_library(), self.library_page.create_table()))
+        file_menu.addSeparator()
+        settings = self._add(file_menu, "Se&ttings…", QKeySequence("Ctrl+,"), self.show_settings)
+        settings.setMenuRole(QAction.MenuRole.PreferencesRole)  # a Mac puts it in the app menu
         file_menu.addSeparator()
         self._add(file_menu, "&Save Changes", QKeySequence.StandardKey.Save, self._pane("save"))
         self._add(file_menu, "&Close Tome", QKeySequence.StandardKey.Close, self.close_current)
@@ -227,6 +275,19 @@ class MainWindow(QMainWindow):
         elif hasattr(focus, "copy"):
             focus.copy()
 
+    def show_settings(self) -> None:
+        from bookwyrm.ui.settings import SettingsDialog
+
+        dialog = SettingsDialog(self.library, self)
+        dialog.coverHeightChanged.connect(self.library_page.set_cover_height)
+        dialog.readingChanged.connect(self._apply_reading_preferences)
+        dialog.libraryChangeRequested.connect(self.libraryChangeRequested)
+        dialog.exec()
+
+    def _apply_reading_preferences(self) -> None:
+        for pane in self._panes():
+            pane.apply_preferences()
+
     def show_about(self) -> None:
         from bookwyrm import __version__
         from bookwyrm.ui.library.dialogs import AboutDialog
@@ -323,8 +384,13 @@ class MainWindow(QMainWindow):
             return None
         pane = self._open_pane(str(path), book.title, group or self.left)
         pane.attach_library(self.library, book_id)
-        pane.restore({"page": book.last_page, "offset": book.last_offset,
-                      "zoom": book.last_zoom, "mode": book.last_zoom_mode})
+        if book.last_opened_at is None:  # never read before: start the way Settings say
+            first = prefs.get("reader/zoom")
+            pane.restore({"page": 0, "offset": 0.0, "zoom": 1.0,
+                          "mode": "custom" if first == "actual" else first})
+        else:
+            pane.restore({"page": book.last_page, "offset": book.last_offset,
+                          "zoom": book.last_zoom, "mode": book.last_zoom_mode})
         self.library.mark_opened(book_id)
         return pane
 
@@ -554,13 +620,27 @@ class MainWindow(QMainWindow):
             self._save_pane(pane)
         self._dirty.clear()
 
-    def closeEvent(self, event) -> None:
+    def release_library(self) -> bool:
+        """Let go of the library: settle unsaved tomes, remember the session, close every
+        tome and stop the helpers. Returns False if the user cancelled. After this the
+        window is only good for closing (the library may be moved or swapped)."""
+        if self._released:
+            return True
         for pane in self._panes():  # settle every unsaved tome before anything closes
             if not self._may_close(pane):
-                event.ignore()
-                return
+                return False
+        self._save_session()
         self.settings.setValue("window/geometry", self.saveGeometry())
         for pane in self._panes():
             self.close_pane(pane, ask=False)
         self.importer.close()
+        self._save_timer.stop()
+        self.library_page.detach()  # the catalogue may be closed under us from here on
+        self._released = True
+        return True
+
+    def closeEvent(self, event) -> None:
+        if not self.release_library():
+            event.ignore()
+            return
         super().closeEvent(event)

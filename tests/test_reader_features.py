@@ -44,10 +44,6 @@ def library(tmp_path):
 
 @pytest.fixture
 def pane(qtbot, sample_pdf, monkeypatch):
-    monkeypatch.setattr("bookwyrm.ui.reader.reader_pane.QSettings.value",
-                        lambda self, key, default=None, **_kw: default)
-    monkeypatch.setattr("bookwyrm.ui.reader.reader_pane.QSettings.setValue",
-                        lambda self, key, value: None)
     session = DocumentSession(str(sample_pdf))
     pane = ReaderPane(session)
     qtbot.addWidget(pane)

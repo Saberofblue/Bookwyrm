@@ -22,9 +22,6 @@ def library(tmp_path):
 
 @pytest.fixture
 def window(qtbot, library, monkeypatch):
-    for target in ("bookwyrm.ui.main_window.QSettings", "bookwyrm.ui.reader.reader_pane.QSettings"):
-        monkeypatch.setattr(f"{target}.value", lambda self, key, default=None, **_kw: default)
-        monkeypatch.setattr(f"{target}.setValue", lambda self, key, value: None)
     window = MainWindow(library)
     monkeypatch.setattr(window, "_ask_unsaved", lambda title: "discard")
     qtbot.addWidget(window)

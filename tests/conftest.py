@@ -25,3 +25,17 @@ def make_pdf(path, pages=6, width=400, height=600, title="Test Tome"):
 @pytest.fixture
 def sample_pdf(tmp_path):
     return make_pdf(tmp_path / "sample.pdf")
+
+
+@pytest.fixture(autouse=True)
+def isolated_preferences(tmp_path_factory):
+    """Give every test its own empty preferences, and never touch the real ones."""
+    from PySide6.QtCore import QCoreApplication, QSettings
+
+    folder = tmp_path_factory.mktemp("preferences")
+    QCoreApplication.setOrganizationName("BookwyrmTests")
+    QCoreApplication.setApplicationName("BookwyrmTests")
+    QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(folder))
+    yield
+    QSettings().clear()

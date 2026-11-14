@@ -8,6 +8,11 @@ from pathlib import Path
 DEFAULT_ROOT = Path.home() / "Bookwyrm Library"
 
 
+def env_override() -> bool:
+    """Is the library location fixed from outside by $BOOKWYRM_LIBRARY?"""
+    return bool(os.environ.get("BOOKWYRM_LIBRARY"))
+
+
 def library_root(configured: str | None = None) -> Path:
     """The library folder: $BOOKWYRM_LIBRARY, then the saved setting, then the default.
 

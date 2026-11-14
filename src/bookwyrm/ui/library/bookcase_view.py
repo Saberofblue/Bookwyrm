@@ -29,7 +29,8 @@ RAIL_H = 38
 BAY_TOP = 26  # clear space above the covers; set plaques hang here
 PLANK_H = 28
 BOOKEND_W = 16
-ROW_H = BAY_TOP + COVER_H + PLANK_H
+ROW_H = BAY_TOP + COVER_H + PLANK_H  # at the default cover height
+MIN_COVER_H, MAX_COVER_H = 110, 260
 DEFAULT_ASPECT = 0.76
 
 
@@ -72,6 +73,7 @@ class BookcaseView(QAbstractScrollArea):
     def __init__(self, cover_path, parent=None):
         super().__init__(parent)
         self._cover_path = cover_path  # book id -> Path
+        self.cover_h = COVER_H  # adjustable: see set_cover_height()
         self._sections: list[Section] = []
         self._empty_text = "The shelves stand empty."
         self._slots: list[_Slot] = []
@@ -97,6 +99,27 @@ class BookcaseView(QAbstractScrollArea):
         self.viewport().setMouseTracking(True)
         self.verticalScrollBar().setSingleStep(40)
         self.verticalScrollBar().valueChanged.connect(lambda _: self.viewport().update())
+
+    @property
+    def row_h(self) -> int:
+        """Height of one board: the clear space, the tomes, and the plank they stand on."""
+        return BAY_TOP + self.cover_h + PLANK_H
+
+    @property
+    def _bookend_h(self) -> int:
+        return min(74, round(self.cover_h * 0.43))
+
+    def _bookend_rect(self, x: int, row_y: int) -> QRect:
+        tall = self._bookend_h
+        return QRect(x, row_y + BAY_TOP + self.cover_h - tall, BOOKEND_W, tall)
+
+    def set_cover_height(self, height: int) -> None:
+        """Make the tomes on the shelves bigger or smaller."""
+        height = max(MIN_COVER_H, min(MAX_COVER_H, int(height)))
+        if height != self.cover_h:
+            self.cover_h = height
+            self._covers.clear()  # cached pictures were scaled for the old size
+            self._relayout()
 
     # -- content ----------------------------------------------------------------
 
@@ -143,7 +166,7 @@ class BookcaseView(QAbstractScrollArea):
                 self._covers[book.id] = None
             else:
                 dpr = self.devicePixelRatioF()
-                pixmap = pixmap.scaledToHeight(round(COVER_H * dpr),
+                pixmap = pixmap.scaledToHeight(round(self.cover_h * dpr),
                                                Qt.TransformationMode.SmoothTransformation)
                 pixmap.setDevicePixelRatio(dpr)
                 self._covers[book.id] = pixmap
@@ -171,48 +194,47 @@ class BookcaseView(QAbstractScrollArea):
                 first_span = True
                 if in_set:
                     if x + BOOKEND_W + 90 > right and x > left:
-                        row_y += ROW_H
+                        row_y += self.row_h
                         x = left
-                    self._bookends.append(
-                        (QRect(x, row_y + BAY_TOP + COVER_H - 74, BOOKEND_W, 74), True))
+                    self._bookends.append((self._bookend_rect(x, row_y), True))
                 span_start = x
                 if in_set:
                     x += BOOKEND_W + 5
 
                 for book in group.books:
-                    height = COVER_H - (zlib.crc32(str(book.id).encode()) % 3) * 5
+                    height = self.cover_h - (zlib.crc32(str(book.id).encode()) % 3) * 5
                     book_w = round(height * self._aspect(book))
                     if x + book_w > right and x > left:
                         if in_set:
                             self._close_span(set_zones, group, span_start, x - GAP, row_y,
                                              first_span)
                             first_span = False
-                        row_y += ROW_H
+                        row_y += self.row_h
                         x = left
                         span_start = x
-                    rect = QRect(x, row_y + BAY_TOP + COVER_H - height, book_w, height)
+                    rect = QRect(x, row_y + BAY_TOP + self.cover_h - height, book_w, height)
                     self._slots.append(_Slot(rect, book, group.place_id))
                     x += book_w + GAP
 
                 if in_set:
                     x = x - GAP + 5 if group.books else x + 54
-                    self._bookends.append(
-                        (QRect(x, row_y + BAY_TOP + COVER_H - 74, BOOKEND_W, 74), False))
+                    self._bookends.append((self._bookend_rect(x, row_y), False))
                     x += BOOKEND_W
                     self._close_span(set_zones, group, span_start, x, row_y, first_span)
                     x += GAP + 8
 
-            rows = (row_y - y) // ROW_H + 1
+            rows = (row_y - y) // self.row_h + 1
             for row in range(rows):
-                self._planks.append(QRect(POST_W, y + row * ROW_H + BAY_TOP + COVER_H,
+                self._planks.append(QRect(POST_W, y + row * self.row_h + BAY_TOP + self.cover_h,
                                           width - 2 * POST_W, PLANK_H))
             if section.place_id is not None:
                 section_zones.append(
-                    (QRect(POST_W, rail.top(), rail.width(), RAIL_H + rows * ROW_H),
+                    (QRect(POST_W, rail.top(), rail.width(), RAIL_H + rows * self.row_h),
                      section.place_id))
             if count == 0 and not any(g.title is not None for g in section.groups):
-                self._hints.append((QRect(left, y + BAY_TOP, right - left, COVER_H), section.hint))
-            y += rows * ROW_H
+                self._hints.append(
+                    (QRect(left, y + BAY_TOP, right - left, self.cover_h), section.hint))
+            y += rows * self.row_h
         self._zones = set_zones + section_zones
         self._content_h = y + (36 if self._sections else 0)
         bar = self.verticalScrollBar()
@@ -223,7 +245,7 @@ class BookcaseView(QAbstractScrollArea):
     def _close_span(self, set_zones, group: Group, start_x: int, end_x: int, row_y: int,
                     first: bool) -> None:
         """Record one row's worth of a set: its drop zone, and its plaque on the first row."""
-        zone = QRect(start_x - 5, row_y, end_x - start_x + 10, ROW_H - PLANK_H)
+        zone = QRect(start_x - 5, row_y, end_x - start_x + 10, self.row_h - PLANK_H)
         set_zones.append((zone, group.place_id))
         if first:
             wide = min(painters.plaque_width(group.title, 10), max(zone.width(), 70))
@@ -462,7 +484,7 @@ class BookcaseView(QAbstractScrollArea):
                     target = 0
                 else:
                     here = self._slots[current].rect
-                    step = ROW_H if key == Qt.Key.Key_Down else -ROW_H
+                    step = self.row_h if key == Qt.Key.Key_Down else -self.row_h
                     want = QPoint(here.center().x(), here.bottom() + step)
                     target = min(
                         range(len(self._slots)),

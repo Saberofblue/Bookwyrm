@@ -36,9 +36,6 @@ def png(color=0xFF336699, size=(40, 30)) -> bytes:
 
 @pytest.fixture
 def window(qtbot, library, monkeypatch):
-    for target in ("bookwyrm.ui.main_window.QSettings", "bookwyrm.ui.reader.reader_pane.QSettings"):
-        monkeypatch.setattr(f"{target}.value", lambda self, key, default=None, **_kw: default)
-        monkeypatch.setattr(f"{target}.setValue", lambda self, key, value: None)
     window = MainWindow(library)
     qtbot.addWidget(window)
     window.resize(1300, 800)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRectF, QSettings, Qt, Signal
+from PySide6.QtCore import QPoint, QRectF, Qt, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from bookwyrm.db.repo import LibraryError
+from bookwyrm.ui import prefs
 from bookwyrm.ui.editor.scriptorium import Scriptorium
 from bookwyrm.ui.extras.boards import image_bytes, thumbnail_bytes
 from bookwyrm.ui.keys import hint
@@ -176,11 +177,7 @@ class ReaderPane(QWidget):
         session.failed.connect(self._on_request_failed)
         self.view.excerptDrawn.connect(self._excerpt_menu)
 
-        settings = QSettings()
-        show_side = settings.value("reader/side_panel", True, type=bool)
-        self.side.setVisible(show_side)
-        self._side_button.setChecked(show_side)
-        self.set_reading_mode(settings.value("reader/mode", "day"))
+        self.apply_preferences()
         self.view.set_session(session)
 
     def _text_button(self, text: str, tip: str, slot) -> QToolButton:
@@ -469,11 +466,18 @@ class ReaderPane(QWidget):
 
     # -- side panel and reading mode ---------------------------------------------
 
+    def apply_preferences(self) -> None:
+        """Take up the reading preferences (when opened, and when Settings change them)."""
+        show_side = prefs.get("reader/side_panel")
+        self.side.setVisible(show_side)
+        self._side_button.setChecked(show_side)
+        self.set_reading_mode(prefs.get("reader/mode"))
+
     def toggle_side(self) -> None:
-        show = not self.side.isVisible()
+        show = self.side.isHidden()
         self.side.setVisible(show)
         self._side_button.setChecked(show)
-        QSettings().setValue("reader/side_panel", show)
+        prefs.put("reader/side_panel", show)
 
     def set_reading_mode(self, mode: str) -> None:
         if mode not in READING_MODES:
@@ -488,7 +492,7 @@ class ReaderPane(QWidget):
         current = READING_MODES.index(self.view.reading_mode)
         mode = READING_MODES[(current + 1) % len(READING_MODES)]
         self.set_reading_mode(mode)
-        QSettings().setValue("reader/mode", mode)
+        prefs.put("reader/mode", mode)
 
     # -- copy ----------------------------------------------------------------------
 

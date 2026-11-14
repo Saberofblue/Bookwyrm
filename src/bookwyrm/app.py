@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from bookwyrm import log, paths
 from bookwyrm.db.repo import Library
@@ -58,17 +59,63 @@ def create_app(argv=None) -> QApplication:
     return app
 
 
+class Shell:
+    """Owns the open library and its window, and can swap the library for another."""
+
+    def __init__(self, app: QApplication, size: tuple[int, int]):
+        self.app = app
+        self.size = size
+        self.library: Library | None = None
+        self.window: MainWindow | None = None
+
+    def open(self, root: Path) -> MainWindow:
+        root.mkdir(parents=True, exist_ok=True)
+        log.install(str(root / "bookwyrm.log"))  # helpers inherit the location
+        self.library = Library(root)
+        self.window = MainWindow(self.library)
+        self.window.libraryChangeRequested.connect(self.change_library)
+        self.window.resize(*self.size)
+        self.window.show()
+        return self.window
+
+    def change_library(self, folder: str, mode: str) -> None:
+        """Move the library to `folder` ('move') or start using the one there ('switch')."""
+        from bookwyrm.ui.settings import move_with_progress
+
+        target, old_window, old_root = Path(folder), self.window, self.library.root
+        if not old_window.release_library():
+            return  # an unsaved tome was not settled: stay as we are
+        self.library.close()
+        problem = ""
+        if mode == "move":
+            problem = move_with_progress(old_root, target, old_window)
+        if problem:  # nothing moved: carry on with the library where it was
+            window = self.open(old_root)
+            if problem != "cancelled":
+                QMessageBox.warning(window, "Bookwyrm",
+                                    f"Your library was not moved.\n\n{problem}")
+        else:
+            if not paths.env_override():
+                QSettings().setValue("library_root", str(target))
+            if mode == "move":  # the same library in a new place: its open tomes come along
+                QSettings().setValue("session/library", str(target))
+            window = self.open(target)
+            window.notice(f"Your library now lives in {target}." if mode == "move"
+                          else f"Now using the library in {target}.")
+        old_window.close()
+        old_window.deleteLater()
+
+    def close(self) -> None:
+        if self.library is not None:
+            self.library.close()
+
+
 def run(argv=None) -> int:
     args = _parse(sys.argv[1:] if argv is None else argv)
     app = create_app()
-    root = paths.library_root(QSettings().value("library_root"))
-    root.mkdir(parents=True, exist_ok=True)
-    log.install(str(root / "bookwyrm.log"))  # helpers inherit the location
-    library = Library(root)
-    window = MainWindow(library)
     width, height = (int(n) for n in args.size.lower().split("x"))
-    window.resize(width, height)
-    window.show()
+    shell = Shell(app, (width, height))
+    window = shell.open(paths.library_root(QSettings().value("library_root")))
     if args.pdf:
         pane = window.open_path(args.pdf)
 
@@ -83,4 +130,4 @@ def run(argv=None) -> int:
     try:
         return app.exec()
     finally:
-        library.close()
+        shell.close()
