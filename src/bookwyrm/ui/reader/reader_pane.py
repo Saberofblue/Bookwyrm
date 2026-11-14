@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QRectF, Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMenu,
-    QSpinBox,
     QSplitter,
     QToolButton,
     QVBoxLayout,
@@ -105,22 +106,31 @@ class ReaderPane(QWidget):
 
         self._prev = self._text_button("‹", "Previous page", lambda: self.view.step_page(-1))
         self._next = self._text_button("›", "Next page", lambda: self.view.step_page(1))
-        self._page_box = QSpinBox(self)
-        self._page_box.setRange(1, 1)
-        self._page_box.setKeyboardTracking(False)
-        self._page_box.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self._page_box.setToolTip("Go to page")
-        self._page_box.setMinimumWidth(58)
-        self._page_box.valueChanged.connect(lambda n: self.view.go_to_page(n - 1))
+        self._labels: list | None = None  # the number printed on each page, if recorded
+        self._page_field = QLineEdit(self)
+        self._page_field.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._page_field.setFixedWidth(66)
+        self._page_field.setToolTip("Go to page")
+        self._page_field.returnPressed.connect(self._page_typed)
         self._page_total = QLabel("of –", self)
+        self._back_button = self._text_button(
+            "←", f"Back to where you were ({hint(QKeySequence.StandardKey.Back)})",
+            self.view.go_back)
+        self._forward_button = self._text_button(
+            "→", f"Forward ({hint(QKeySequence.StandardKey.Forward)})", self.view.go_forward)
+        self._back_button.setEnabled(False)
+        self._forward_button.setEnabled(False)
 
         bar = QHBoxLayout()
         bar.setContentsMargins(8, 4, 8, 4)
         bar.setSpacing(4)
         bar.addWidget(self._side_button)
         bar.addSpacing(8)
+        bar.addWidget(self._back_button)
+        bar.addWidget(self._forward_button)
+        bar.addSpacing(6)
         bar.addWidget(self._prev)
-        bar.addWidget(self._page_box)
+        bar.addWidget(self._page_field)
         bar.addWidget(self._page_total)
         bar.addWidget(self._next)
         bar.addStretch(1)
@@ -158,9 +168,11 @@ class ReaderPane(QWidget):
         self.view.loaded.connect(self._on_loaded)
         self.view.currentPageChanged.connect(self._on_page)
         self.view.zoomChanged.connect(self._on_zoom)
-        self.side.outline.pageRequested.connect(self.view.go_to_page)
-        self.side.pages.pageRequested.connect(self.view.go_to_page)
-        self.side.ribbons.pageRequested.connect(self.view.go_to_page)
+        self.side.outline.pageRequested.connect(self.view.jump_to)
+        self.side.pages.pageRequested.connect(self.view.jump_to)
+        self.side.ribbons.pageRequested.connect(self._jump_to_saved_page)
+        self.view.linkActivated.connect(self.follow_link)
+        self.view.historyChanged.connect(self._on_history)
         self.side.ribbons.addRequested.connect(self.toggle_ribbon)
         self.side.ribbons.renamed.connect(self._rename_ribbon)
         self.side.ribbons.removed.connect(self._remove_ribbon)
@@ -229,7 +241,8 @@ class ReaderPane(QWidget):
             self._toc = state["toc"]
             self.side.set_toc(self._toc)
         if state.get("structural"):
-            self.side.pages.set_session(self.session, state.get("sizes") or [])
+            self._labels = state.get("labels")
+            self.side.pages.set_session(self.session, state.get("sizes") or [], self._labels)
             self._on_loaded(toc=False)
         if self.library is not None:
             self._reload_ribbons()
@@ -305,7 +318,10 @@ class ReaderPane(QWidget):
 
     def _reload_ribbons(self) -> None:
         ribbons = self.library.ribbons(self.book_id)
-        self.side.ribbons.set_ribbons(ribbons)
+        now = (lambda saved: saved) if self._origins is None else \
+            (lambda saved: self._origins.index(saved) if saved in self._origins else -1)
+        printed = {r.page: self.page_text(now(r.page)) for r in ribbons if now(r.page) >= 0}
+        self.side.ribbons.set_ribbons(ribbons, printed if self._labels else None)
         if self._origins is None:
             self.view.set_ribbon_pages(r.page for r in ribbons)
         else:  # pages have moved since the last save: show each ribbon where its page is now
@@ -453,10 +469,10 @@ class ReaderPane(QWidget):
         """Jump to a pinned or excerpted spot and outline it."""
         def act():
             if rect is None:
-                self.view.go_to_page(page)
+                self.view.jump_to(page)
                 return
             box = QRectF(rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1])
-            self.view.go_to_page(page, max(0.0, box.top() - 24))
+            self.view.jump_to(page, max(0.0, box.top() - 24))
             self.view.marquee = (page, box)
             self.view.viewport().update()
         if self.view.page_count():
@@ -472,6 +488,91 @@ class ReaderPane(QWidget):
         self.side.setVisible(show_side)
         self._side_button.setChecked(show_side)
         self.set_reading_mode(prefs.get("reader/mode"))
+        self.view.set_spread(prefs.get("reader/spread"))
+
+    # -- getting around: printed page numbers, Back and Forward, links -------------
+
+    def page_text(self, index: int) -> str:
+        """What to call a page: the number printed on it if the tome records one."""
+        if self._labels and 0 <= index < len(self._labels):
+            return self._labels[index]
+        return str(index + 1)
+
+    def page_for(self, text: str) -> int | None:
+        """The page a typed number means, or None.
+
+        A printed page number wins ("86" is the page printed 86, wherever that falls
+        in the file). "#93" always means the 93rd page of the file.
+        """
+        text = text.strip()
+        count = self.view.page_count()
+        if text.startswith("#"):
+            text, by_label = text[1:].strip(), False
+        else:
+            by_label = bool(self._labels)
+        if by_label:
+            wanted = text.casefold()
+            for index, label in enumerate(self._labels):
+                if label.casefold() == wanted:
+                    return index
+        try:
+            number = int(text)
+        except ValueError:
+            return None
+        return number - 1 if 1 <= number <= count else None
+
+    def _page_typed(self) -> None:
+        page = self.page_for(self._page_field.text())
+        if page is None:
+            self.notice.emit(f"This tome has no page “{self._page_field.text().strip()}”.")
+            self._on_page(self.view.current_page())
+        else:
+            self.view.jump_to(page)
+        self.view.setFocus()
+
+    def _on_history(self, back: bool, forward: bool) -> None:
+        self._back_button.setEnabled(back)
+        self._forward_button.setEnabled(forward)
+
+    def _jump_to_saved_page(self, page: int) -> None:
+        """Go to a page numbered as in the saved file (ribbons are stored that way)."""
+        if self._origins is not None and page in self._origins:
+            page = self._origins.index(page)
+        self.view.jump_to(page)
+
+    def follow_link(self, link: dict) -> None:
+        """A link in the tome was clicked: jump there, or offer to open a web address."""
+        if "page" in link:
+            self.view.jump_to(link["page"], max(0.0, float(link.get("y", 0.0)) - 18.0))
+            return
+        address = QUrl(link.get("uri", ""))
+        if address.scheme().lower() not in ("http", "https", "mailto"):
+            self.notice.emit("That link leads outside the tome and cannot be opened here.")
+            return
+        if dialogs.confirm(self, "Open Link",
+                           f"Open this address outside Bookwyrm?\n\n{address.toString()}",
+                           "Open"):
+            QDesktopServices.openUrl(address)
+
+    def toggle_spread(self) -> None:
+        prefs.put("reader/spread", not self.view.spread)
+        self.view.set_spread(prefs.get("reader/spread"))
+
+    def print_tome(self) -> None:
+        from bookwyrm.ui.reader.printing import print_tome
+        print_tome(self, self.tome_title or "this tome")
+
+    def set_chrome(self, visible: bool) -> None:
+        """Hide the toolbars and side panel for full-screen reading, or bring them back."""
+        if not visible:
+            self._chrome = (self.side.isVisible(), self.scriptorium.toolbar.isVisible())
+            for widget in (self.toolbar, self.side, self.scriptorium.toolbar):
+                widget.hide()
+        else:
+            side, tools = getattr(self, "_chrome", (prefs.get("reader/side_panel"), False))
+            self.toolbar.show()
+            self.side.setVisible(side)
+            self.scriptorium.toolbar.setVisible(tools)
 
     def toggle_side(self) -> None:
         show = self.side.isHidden()
@@ -607,7 +708,7 @@ class ReaderPane(QWidget):
     def go_to(self, page: int, find: str | None = None) -> None:
         """Jump to a page (once loaded) and optionally search for `find` there."""
         def act():
-            self.view.go_to_page(page)
+            self.view.jump_to(page)
             if find:
                 self._search_from = page  # the view has not caught up with the jump yet
                 self.find.field.clear()
@@ -620,24 +721,29 @@ class ReaderPane(QWidget):
     # -- slots --------------------------------------------------------------
 
     def _on_loaded(self, toc: bool = True) -> None:
-        count = self.view.page_count()
         info = self.session.info or {}
-        self._page_box.blockSignals(True)
-        self._page_box.setRange(1, max(1, count))
-        self._page_box.blockSignals(False)
-        self._page_total.setText(f"of {count}")
         if toc:
+            self._labels = info.get("labels")
             self._toc = info.get("toc", [])
             self.side.set_toc(self._toc)
-            self.side.pages.set_session(self.session, info.get("sizes", []))
+            self.side.pages.set_session(self.session, info.get("sizes", []), self._labels)
+        self._page_field.setToolTip(
+            "Go to a page by the number printed on it. Put # first to count pages from the "
+            "start of the file instead, as in #93." if self._labels else "Go to page")
+        self._on_page(self.view.current_page(), announce=False)
+        if self.library is not None:
+            self._reload_ribbons()
 
-    def _on_page(self, index: int) -> None:
-        self._page_box.blockSignals(True)
-        self._page_box.setValue(index + 1)
-        self._page_box.blockSignals(False)
+    def _on_page(self, index: int, announce: bool = True) -> None:
+        count = self.view.page_count()
+        if not self._page_field.hasFocus():
+            self._page_field.setText(self.page_text(index))
+        self._page_total.setText(f"({index + 1} of {count})" if self._labels
+                                 else f"of {count}")
         self.side.outline.follow_page(index)
         self.side.pages.follow_page(index)
-        self.stateChanged.emit()
+        if announce:
+            self.stateChanged.emit()
 
     def _on_zoom(self, factor: float, mode: str) -> None:
         self._zoom_box.blockSignals(True)

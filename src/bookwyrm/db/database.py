@@ -6,7 +6,12 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# How to bring a catalogue from each older version up by one. Applied in order.
+UPGRADES = {
+    1: "ALTER TABLE places ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0",
+}
 
 
 def connect(path: Path | str) -> sqlite3.Connection:
@@ -30,4 +35,10 @@ def _migrate(con: sqlite3.Connection) -> None:
         schema = resources.files("bookwyrm.db").joinpath("schema.sql").read_text("utf-8")
         con.executescript(schema)
         con.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        con.commit()
+        return
+    while version < SCHEMA_VERSION:  # an older catalogue: upgrade it step by step
+        con.executescript(UPGRADES[version])
+        version += 1
+        con.execute(f"PRAGMA user_version = {version}")
         con.commit()

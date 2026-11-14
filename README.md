@@ -16,8 +16,9 @@ A library, reader and scriptorium for your PDFs, kept by a silver dragon.
   Desktop and Start-menu shortcuts. After that use the shortcut or `Start Bookwyrm.bat`.
 
 Your library lives in a folder called `Bookwyrm Library` in your home folder. Adding a
-PDF **copies** it there; the file you added is never changed. Set the environment
-variable `BOOKWYRM_LIBRARY` to use a different folder (handy for experiments).
+PDF **copies** it there; the file you added is never changed. **Settings** (⌘, or the
+button under the bookcase list) lets you keep the library somewhere else: Bookwyrm can
+move everything there, or switch to a library that is already there.
 
 Shortcuts below are written for a Mac. On Windows use **Ctrl** for ⌘, **Shift** for ⇧
 and **Alt** for ⌥; the tooltips inside the app always show the right keys for your system.
@@ -38,12 +39,25 @@ and **Alt** for ⌥; the tooltips inside the app always show the right keys for 
 Add tomes with **Add Tomes…** (⌘O) or by dragging PDFs onto a shelf. Drag tomes
 between shelves; hold ⌥ (Ctrl on Windows) while dropping to shelve a tome in a second place.
 
+On the shelves:
+
+- **Filter, Label, Sort** above the shelves narrow and order what you see. Give tomes
+  Labels from the right-click menu.
+- **Cover size** slider, and **List** for a compact table of a big collection.
+- **Minimize a shelf** by clicking its nameplate rail (the arrow shows which are folded).
+- **Right-click a tome** to export a copy (with your edits) or the original, or to show
+  its file in Finder or File Explorer.
+- Bookwyrm reopens the tomes you had open last time (a Settings switch turns this off).
+
 ## Reading
 
 | Action | Shortcut |
 |---|---|
 | Zoom in / out / actual size | ⌘+ / ⌘− / ⌘0 (also pinch, or ⌘-scroll) |
 | Fit width / fit page | ⌘1 / ⌘2 |
+| Two-page spread / full screen | ⌘3 / ⌃⌘F (F11 on Windows; Esc leaves) |
+| Back / Forward after a jump | ⌘[ / ⌘] (Alt+← / Alt+→ on Windows) |
+| Print | ⌘P |
 | Find in tome, next, previous | ⌘F, ⌘G, ⇧⌘G |
 | Tie or untie a Ribbon (bookmark) | ⌘D |
 | Side panel (Contents, Pages, Ribbons) | ⌥⌘S |
@@ -53,6 +67,10 @@ between shelves; hold ⌥ (Ctrl on Windows) while dropping to shelve a tome in a
 | Move tome to the other side / open it alongside | ⌘\ / ⇧⌘\ |
 | Back to the Library | ⌘L |
 
+Links inside a tome work: click a contents entry or a "see page 212" and use Back to
+return. Where a tome records the numbers printed on its pages, the page box shows and
+accepts those (type `86` for the page printed 86; `#93` for the 93rd sheet of the file).
+
 ## The Scriptorium (editing)
 
 Open it with the quill button or ⇧⌘E. It works on tomes in your library only.
@@ -61,8 +79,8 @@ Open it with the quill button or ⇧⌘E. It works on tomes in your library only
   boxes, ovals, lines and arrows; the Pointer moves, edits and deletes them.
 - **Fill Form:** click a field and type; Tab moves to the next.
 - **Edit Text / Add Text:** change the wording of a line in place, or write new text.
-- **Pictures / Add Picture / Erase:** move, resize, replace, delete or add pictures;
-  erase a region.
+- **Pictures / Add Picture / Erase:** move, resize (drag a corner; hold Shift to
+  stretch), replace, delete or add pictures; erase a region.
 - **Pages…, Contents…, Properties…:** rearrange, rotate, delete, insert and extract
   pages; edit the table of contents; edit title, author and keywords.
 - **Undo / Redo** (⌘Z / ⇧⌘Z) work until you **Save** (⌘S). The first save keeps a

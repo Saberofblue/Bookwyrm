@@ -15,6 +15,7 @@ Requests (client -> host)
     ("widgets", req_id, page)                    form fields on a page
     ("text_lines", req_id, page)                 lines of text with their style (for editing)
     ("images", req_id, page)                     pictures placed on a page
+    ("links", req_id, page)                      clickable links on a page
     ("image_uses", req_id, xref)                 how many pages show a stored picture
     ("edit", req_id, name, args)                 one undoable change (see pdf/editing.py)
     ("undo", req_id) / ("redo", req_id)
@@ -85,6 +86,7 @@ class Host:
             "revision": self.revision,
             "is_pdf": doc.is_pdf,
             "is_form": bool(doc.is_form_pdf),
+            "labels": self.editing.page_labels(doc),
             "metadata": self.metadata(),
             "edit": self.editor.summary(),
         }
@@ -113,6 +115,7 @@ class Host:
         if structural:
             state["sizes"] = [(doc[i].rect.width, doc[i].rect.height)
                               for i in range(doc.page_count)]
+            state["labels"] = self.editing.page_labels(doc)  # numbering follows the pages
         return state
 
     def after_change(self, entry: dict | None) -> dict:
@@ -259,13 +262,15 @@ class Host:
                         conn.send(("reply", msg[1], self.words(msg[2])))
                     except Exception as exc:
                         conn.send(("failed", msg[1], f"{type(exc).__name__}: {exc}"))
-                elif op in ("annots", "widgets", "text_lines", "images", "image_uses"):
+                elif op in ("annots", "widgets", "text_lines", "images", "image_uses",
+                            "links"):
                     try:
                         lister = {
                             "annots": self.editing.list_annots,
                             "widgets": self.editing.list_widgets,
                             "text_lines": self.editing.list_text_lines,
                             "images": self.editing.list_images,
+                            "links": self.editing.list_links,
                             "image_uses": self.editing.image_uses,
                         }[op]
                         conn.send(("reply", msg[1], lister(self.doc, msg[2])))

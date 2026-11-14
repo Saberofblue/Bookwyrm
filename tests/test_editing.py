@@ -573,3 +573,40 @@ def test_replace_file_waits_out_a_brief_lock(tmp_path, monkeypatch):
                         lambda a, b: (_ for _ in ()).throw(PermissionError("stuck")))
     with pytest.raises(PermissionError):
         editing.replace_file(str(source), str(target), attempts=3, pause=0.001)
+
+
+# ---- reading aids: links and printed page numbers ----------------------------------------
+
+def test_links_are_listed_with_where_they_lead(tmp_path):
+    path = tmp_path / "links.pdf"
+    doc = pymupdf.open()
+    for _ in range(4):
+        doc.new_page(width=400, height=600)
+    first = doc[0]
+    first.insert_link({"kind": pymupdf.LINK_GOTO, "from": pymupdf.Rect(50, 50, 200, 70),
+                       "page": 2, "to": pymupdf.Point(0, 250)})
+    first.insert_link({"kind": pymupdf.LINK_URI, "from": pymupdf.Rect(50, 90, 200, 110),
+                       "uri": "https://example.org/errata"})
+    first.insert_link({"kind": pymupdf.LINK_GOTOR, "from": pymupdf.Rect(50, 130, 200, 150),
+                       "file": "other.pdf", "page": 0})
+    doc.save(path)
+    doc.close()
+    doc = pymupdf.open(path)
+    links = editing.list_links(doc, 0)
+    assert len(links) == 2  # the link to another file is left out
+    jump = next(link for link in links if "page" in link)
+    assert jump["page"] == 2 and jump["rect"] == pytest.approx((50, 50, 200, 70), abs=0.5)
+    assert 0 <= jump["y"] <= 600
+    web = next(link for link in links if "uri" in link)
+    assert web["uri"] == "https://example.org/errata"
+    assert editing.list_links(doc, 1) == []
+    doc.close()
+
+
+def test_printed_page_numbers(editor):
+    assert editing.page_labels(editor.doc) is None  # this tome records none
+    editor.doc.set_page_labels([
+        {"startpage": 0, "prefix": "", "style": "r", "firstpagenum": 1},  # i, ii
+        {"startpage": 2, "prefix": "", "style": "D", "firstpagenum": 1},  # 1, 2, ...
+    ])
+    assert editing.page_labels(editor.doc) == ["i", "ii", "1", "2", "3", "4"]

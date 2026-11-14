@@ -43,6 +43,10 @@ USING IT
 - Organise them into Bookcases, Shelves and Sets, by dragging.
 - Double-click a tome to read it. The quill button opens the Scriptorium for
   highlighting, notes, filling in forms and editing.
+- Click a shelf's nameplate to minimize it; use the boxes above the shelves to
+  filter and sort.
+- "Settings" (under the list of bookcases) lets you keep the library in another
+  folder, such as a bigger drive.
 - Hover over any button to see what it does and its keyboard shortcut.
 - Help > About lists everything Bookwyrm is built with.
 

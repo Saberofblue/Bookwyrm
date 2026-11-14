@@ -1,4 +1,5 @@
--- Bookwyrm catalogue, schema version 1.
+-- Bookwyrm catalogue, schema version 2.
+-- (Version 2 added places.collapsed; database.py upgrades older catalogues in place.)
 
 CREATE TABLE books (
     id              INTEGER PRIMARY KEY,
@@ -29,6 +30,7 @@ CREATE TABLE places (
     name        TEXT    NOT NULL,
     sort_order  INTEGER NOT NULL DEFAULT 0,
     color       TEXT,
+    collapsed   INTEGER NOT NULL DEFAULT 0,      -- 1 = shown minimized in its bookcase
     CHECK ((kind = 'bookcase') = (parent_id IS NULL))
 );
 CREATE INDEX places_parent ON places(parent_id, sort_order);

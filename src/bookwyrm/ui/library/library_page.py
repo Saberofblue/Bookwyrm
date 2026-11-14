@@ -225,6 +225,8 @@ class LibraryPage(QWidget):
         self.view.booksDropped.connect(self._books_dropped)
         self.view.filesDropped.connect(self._files_dropped)
         self.view.removeRequested.connect(self._take_off_shelf)
+        self.view.collapseRequested.connect(
+            lambda place_id, minimize: self.library.set_collapsed([place_id], minimize))
         self.list.openRequested.connect(self.openBook)
         self.list.contextRequested.connect(self._view_menu)
         self.list.filesDropped.connect(self._files_dropped)
@@ -405,7 +407,8 @@ class LibraryPage(QWidget):
                     place.id, "", [Group(place.id, None, loose)],
                     "This bookcase is bare. Add a shelf, or drop tomes here."))
             for shelf in shelves:
-                sections.append(Section(shelf.id, shelf.name, self._groups(shelf)))
+                sections.append(Section(shelf.id, shelf.name, self._groups(shelf),
+                                        collapsible=True, collapsed=shelf.collapsed))
             subtitle = "Bookcase"
         elif place.kind == "shelf":
             sections = [Section(place.id, place.name, self._groups(place))]
@@ -564,6 +567,16 @@ class LibraryPage(QWidget):
         child = CHILD_KIND.get(place.kind)
         if child:
             menu.addAction(f"New {KIND_LABEL[child]}…", lambda: self.create_place(child, place.id))
+        if place.kind == "shelf":
+            menu.addAction("Expand Shelf" if place.collapsed else "Minimize Shelf",
+                           lambda: self.library.set_collapsed([place.id], not place.collapsed))
+        elif place.kind == "bookcase":
+            shelves = [shelf.id for shelf in self.library.children(place.id)]
+            if shelves:
+                menu.addAction("Minimize All Shelves",
+                               lambda: self.library.set_collapsed(shelves, True))
+                menu.addAction("Expand All Shelves",
+                               lambda: self.library.set_collapsed(shelves, False))
         menu.addSeparator()
         menu.addAction("Rename", lambda: self.tree.edit_place(place.id))
         menu.addAction(f"Remove {KIND_LABEL[place.kind]}…", lambda: self._delete_place(place.id))

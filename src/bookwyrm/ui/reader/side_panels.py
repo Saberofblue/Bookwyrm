@@ -104,8 +104,9 @@ class ThumbnailPanel(QListWidget):
         self.verticalScrollBar().valueChanged.connect(lambda _: self._load_timer.start(60))
         self.itemClicked.connect(lambda item: self.pageRequested.emit(self.row(item)))
 
-    def set_session(self, session, sizes: list) -> None:
-        """Show these pages. Called again whenever the tome's pages change."""
+    def set_session(self, session, sizes: list, labels: list | None = None) -> None:
+        """Show these pages, captioned with their printed numbers where the tome has them.
+        Called again whenever the tome's pages change."""
         if self._session is not session:
             self._session = session
             session.pixels.connect(self._on_pixels)
@@ -119,7 +120,8 @@ class ThumbnailPanel(QListWidget):
         blank.fill(QColor(palette.STONE_700))
         placeholder = QIcon(blank)
         for number in range(len(sizes)):
-            item = QListWidgetItem(placeholder, str(number + 1))
+            caption = labels[number] if labels and number < len(labels) else str(number + 1)
+            item = QListWidgetItem(placeholder, caption)
             item.setData(PAGE_ROLE, number)
             item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter)
             item.setSizeHint(QSize(THUMB_W + 12, thumb_h + 26))
@@ -185,6 +187,7 @@ class RibbonPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._building = False
+        self._printed: dict = {}
         self.list = QListWidget(self)
         self.list.setStyleSheet("QListWidget { border: none; background: transparent; }")
         self.list.setEditTriggers(QAbstractItemView.EditTrigger.EditKeyPressed
@@ -214,8 +217,10 @@ class RibbonPanel(QWidget):
         layout.addLayout(buttons)
         self.set_ribbons([])
 
-    def set_ribbons(self, ribbons: list) -> None:
+    def set_ribbons(self, ribbons: list, printed: dict | None = None) -> None:
+        """`printed` maps a ribbon's page to the number printed on it, where known."""
         self._building = True
+        self._printed = printed or {}
         self.list.clear()
         for ribbon in ribbons:
             item = QListWidgetItem(icons.icon("bookmarklet", "#d9736a"),
@@ -235,9 +240,9 @@ class RibbonPanel(QWidget):
                               "Add this PDF to the library to mark its pages.")
             self.hint.setVisible(True)
 
-    @staticmethod
-    def _text(label: str, page: int) -> str:
-        return f"{label}  ·  p. {page + 1}" if label else f"Page {page + 1}"
+    def _text(self, label: str, page: int) -> str:
+        number = self._printed.get(page, str(page + 1))
+        return f"{label}  ·  p. {number}" if label else f"Page {number}"
 
     def _clicked(self, item) -> None:
         self.pageRequested.emit(item.data(PAGE_ROLE)[1])
@@ -247,7 +252,7 @@ class RibbonPanel(QWidget):
             return
         ribbon_id, page, _old = item.data(PAGE_ROLE)
         label = item.text().split("  ·  p. ")[0].strip()
-        if label == f"Page {page + 1}":
+        if label == self._text("", page):
             label = ""
         self.renamed.emit(ribbon_id, label)
 

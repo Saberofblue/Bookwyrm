@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 from PySide6.QtCore import QEventLoop, QSettings, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QInputDialog,
@@ -104,6 +104,9 @@ class MainWindow(QMainWindow):
         self.library_page.unsaved = lambda book_id: any(
             pane.book_id == book_id and pane.session.dirty for pane in self._panes())
 
+        self._escape = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)  # leaves full screen
+        self._escape.activated.connect(self.leave_full_screen)
+        self._escape.setEnabled(False)
         self._dirty: set[ReaderPane] = set()
         self._save_timer = QTimer(self, singleShot=True, interval=800)
         self._save_timer.timeout.connect(self._save_reading_states)
@@ -180,6 +183,7 @@ class MainWindow(QMainWindow):
         settings.setMenuRole(QAction.MenuRole.PreferencesRole)  # a Mac puts it in the app menu
         file_menu.addSeparator()
         self._add(file_menu, "&Save Changes", QKeySequence.StandardKey.Save, self._pane("save"))
+        self._add(file_menu, "&Print…", QKeySequence.StandardKey.Print, self._pane("print_tome"))
         self._add(file_menu, "&Close Tome", QKeySequence.StandardKey.Close, self.close_current)
 
         edit = self.menuBar().addMenu("&Edit")
@@ -216,6 +220,9 @@ class MainWindow(QMainWindow):
         self._add(view, "&Side Panel", QKeySequence("Ctrl+Alt+S"), self._pane("toggle_side"))
         self._add(view, "Next &Reading Mode", QKeySequence("Ctrl+Shift+L"),
                   self._pane("cycle_reading_mode"))
+        self._add(view, "&Two-Page Spread", QKeySequence("Ctrl+3"), self.toggle_spread)
+        self._add(view, "&Full Screen", QKeySequence.StandardKey.FullScreen,
+                  self.toggle_full_screen)
         view.addSeparator()
         self._add(view, "&Move Tome to the Other Side", QKeySequence("Ctrl+\\"),
                   self.move_to_other_side)
@@ -224,6 +231,8 @@ class MainWindow(QMainWindow):
 
         go = self.menuBar().addMenu("&Go")
         self._add(go, "&Library", QKeySequence("Ctrl+L"), self.show_library)
+        self._add(go, "&Back", QKeySequence.StandardKey.Back, self._view("go_back"))
+        self._add(go, "&Forward", QKeySequence.StandardKey.Forward, self._view("go_forward"))
         self._add(go, "Tie or Untie a &Ribbon", QKeySequence("Ctrl+D"),
                   self._pane("toggle_ribbon"))
         go.addSeparator()
@@ -287,6 +296,43 @@ class MainWindow(QMainWindow):
     def _apply_reading_preferences(self) -> None:
         for pane in self._panes():
             pane.apply_preferences()
+
+    def toggle_spread(self) -> None:
+        """Facing pages side by side, for every open tome (and remembered)."""
+        prefs.put("reader/spread", not prefs.get("reader/spread"))
+        self._apply_reading_preferences()
+
+    # -- full-screen reading ----------------------------------------------------------
+
+    def toggle_full_screen(self) -> None:
+        if self.isFullScreen():
+            self.leave_full_screen()
+        elif self.current_pane() is not None:
+            self._was_maximized = self.isMaximized()
+            self.statusBar().hide()
+            self.menuBar().hide()
+            for group in self._groups():
+                group.tabBar().hide()
+            for pane in self._panes():
+                pane.set_chrome(False)
+            self._escape.setEnabled(True)
+            self.showFullScreen()
+            self.current_pane().view.setFocus()
+
+    def leave_full_screen(self) -> None:
+        if not self.isFullScreen():
+            return
+        self._escape.setEnabled(False)
+        self.statusBar().show()
+        self.menuBar().show()
+        for group in self._groups():
+            group.tabBar().show()
+        for pane in self._panes():
+            pane.set_chrome(True)
+        if getattr(self, "_was_maximized", False):
+            self.showMaximized()
+        else:
+            self.showNormal()
 
     def show_about(self) -> None:
         from bookwyrm import __version__

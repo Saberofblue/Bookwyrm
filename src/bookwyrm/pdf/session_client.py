@@ -79,7 +79,7 @@ class DocumentSession(QObject):
         return req_id
 
     def query(self, what: str, subject: int) -> int:
-        """Ask about a page ('text_lines', 'images') or a stored picture ('image_uses').
+        """Ask about a page ('text_lines', 'images', 'links') or a picture ('image_uses').
 
         The answer arrives through `reply`.
         """
@@ -147,6 +147,7 @@ class DocumentSession(QObject):
             self.info["author"] = state["metadata"].get("author", "")
         if state.get("sizes") is not None:
             self.info["sizes"] = state["sizes"]
+            self.info["labels"] = state.get("labels")
 
     def _on_message(self, msg) -> None:
         op = msg[0]

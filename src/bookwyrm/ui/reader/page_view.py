@@ -27,6 +27,9 @@ from bookwyrm.ui.reader import selection
 PT_TO_PX = 96.0 / 72.0  # 100 % zoom shows one PDF point as 1.33 logical pixels
 TILE = 768  # tile edge in device pixels
 GAP = 10.0  # points between pages
+GUTTER = 3.0  # points between the two pages of a spread
+HISTORY = 100  # places remembered for Back
+HANDLE = 7.0  # resize handle size, in screen pixels
 MARGIN = 14.0  # points around the page column
 MIN_ZOOM, MAX_ZOOM = 0.1, 8.0
 ZOOM_STEPS = (0.1, 0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75,
@@ -166,6 +169,14 @@ class PageItem(QGraphicsItem):
                 painter.setPen(pen)
                 painter.setBrush(QColor(111, 191, 227, 50) if chosen else Qt.BrushStyle.NoBrush)
                 painter.drawRect(box.adjusted(-2, -2, 2, 2))
+                if chosen and view.resizable:
+                    half = HANDLE / 2 / (view.zoom() * PT_TO_PX)
+                    painter.setPen(QPen(QColor("#10141c"), 0))
+                    painter.setBrush(OBJECT_COLOR)
+                    for corner in (box.topLeft(), box.topRight(), box.bottomLeft(),
+                                   box.bottomRight()):
+                        painter.drawRect(QRectF(corner.x() - half, corner.y() - half,
+                                                2 * half, 2 * half))
         preview = view.preview
         if preview is None or preview[1] != self.index:
             return
@@ -247,6 +258,8 @@ class PageView(QGraphicsView):
     objectActivated = Signal(int, int)  # page, xref: double-clicked
     objectDeleteRequested = Signal(int, int)  # page, xref
     inlineTabbed = Signal(bool)  # Tab (False) or Shift+Tab (True) left an inline editor
+    linkActivated = Signal(object)  # {"page": int, "y": float} or {"uri": str}
+    historyChanged = Signal(bool, bool)  # can go back, can go forward
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -306,6 +319,20 @@ class PageView(QGraphicsView):
         # edits repaint single pages: each page has its own revision
         self.page_revs: dict[int, int] = {}
         self._stale_revs: dict[int, int] = {}
+        # layout: one page per row, or two side by side like an open book
+        self.spread = False
+        self._sizes: list = []
+        self._row_start: list[int] = []  # for each page, the first page of its row
+        self._row_end: list[int] = []  # ... and the last
+        # Back and Forward
+        self._back: list[tuple[int, float]] = []
+        self._forward: list[tuple[int, float]] = []
+        # links inside the tome
+        self.links: dict[int, list[tuple[QRectF, dict]]] = {}
+        self._link_requests: dict[int, int] = {}  # req_id -> page
+        self._pressed_link: dict | None = None
+        self.resizable = False  # may the selected object be resized by its corners?
+        self.viewport().setMouseTracking(True)  # to show a hand over links
 
         self._refresh_timer = QTimer(self, singleShot=True, interval=0)
         self._refresh_timer.timeout.connect(self._refresh)
@@ -350,8 +377,6 @@ class PageView(QGraphicsView):
         if self._session is not None and self._inflight:
             self._session.cancel(req_id for req_id, _ in self._inflight.values())
         self.commit_inline(False)
-        self._scene.clear()
-        self._items, self._tops = [], []
         self.tiles.clear()
         self.previews.clear()
         self._inflight.clear()
@@ -359,23 +384,69 @@ class PageView(QGraphicsView):
         self._failed.clear()
         self._words.clear()
         self._word_requests.clear()
+        self.links.clear()
+        self._link_requests.clear()
         self._selected, self.selection_rects = {}, {}
         self._anchor = self._focus = None
         self.hits, self.current_hit = {}, None
         self.page_revs, self._stale_revs = {}, {}
         self.object_boxes, self.field_boxes = {}, {}
         self.selected_object = self.marquee = self.preview = self._grab = None
-        self._max_w = max((w for w, _ in sizes), default=1.0)
+        self._back.clear()
+        self._forward.clear()
+        self.historyChanged.emit(False, False)
+        self._place(sizes)
+
+    def _place(self, sizes: list) -> None:
+        """Position the pages: one to a row, or as spreads. Cached pictures stay valid."""
+        self._scene.clear()
+        self._sizes = list(sizes)
+        self._items, self._tops, self._row_start, self._row_end = [], [], [], []
+        widest = max((w for w, _ in sizes), default=1.0)
+        if self.spread:  # like a book: the cover alone on the right, then facing pages
+            rows = [[0]] if sizes else []
+            rows += [list(range(i, min(i + 2, len(sizes)))) for i in range(1, len(sizes), 2)]
+            self._max_w = 2 * widest + GUTTER
+        else:
+            rows = [[i] for i in range(len(sizes))]
+            self._max_w = widest
+        spine = MARGIN + self._max_w / 2
         y = MARGIN
-        for index, (w, h) in enumerate(sizes):
-            item = PageItem(self, index, w, h)
-            item.setPos(MARGIN + (self._max_w - w) / 2, y)
-            self._scene.addItem(item)
-            self._items.append(item)
-            self._tops.append(y)
-            y += h + GAP
+        for row in rows:
+            height = max(sizes[i][1] for i in row)
+            for position, index in enumerate(row):
+                w, h = sizes[index]
+                item = PageItem(self, index, w, h)
+                if not self.spread:
+                    x = MARGIN + (widest - w) / 2
+                elif index == 0 or position == 1:  # right-hand page
+                    x = spine + GUTTER / 2
+                else:  # left-hand page
+                    x = spine - GUTTER / 2 - w
+                item.setPos(x, y + (height - h) / 2)
+                self._scene.addItem(item)
+                self._items.append(item)
+                self._tops.append(y)
+                self._row_start.append(row[0])
+                self._row_end.append(row[-1])
+            y += height + GAP
         self._scene.setSceneRect(0, 0, self._max_w + 2 * MARGIN, y - GAP + MARGIN)
         self._current = -1
+
+    def set_spread(self, on: bool) -> None:
+        """Show two pages side by side (True) or one page per row (False)."""
+        if on == self.spread:
+            return
+        self.spread = on
+        if not self._items:
+            return
+        self.commit_inline(False)
+        page = self.current_page()
+        self._place(self._sizes)
+        if self._mode in ("fit_width", "fit_page"):
+            self.set_zoom(self._fit_factor(self._mode), self._mode)
+        self.go_to_page(page)
+        self._settle()
 
     def paint_revs(self, index: int) -> tuple[int, ...]:
         """Revisions of a page worth painting: the outgoing one beneath the current one."""
@@ -403,6 +474,7 @@ class PageView(QGraphicsView):
                 self._stale_revs.setdefault(page, old)
                 self.page_revs[page] = old + 1
                 self._words.pop(page, None)
+                self.links.pop(page, None)
                 self.previews.pop(page, None)
                 self.object_boxes.pop(page, None)
                 if self.hits.pop(page, None) is not None and self.current_hit \
@@ -469,7 +541,9 @@ class PageView(QGraphicsView):
         by_width = viewport.width() / ((self._max_w + 2 * MARGIN) * PT_TO_PX)
         if mode == "fit_width" or not self._items:
             return by_width
-        page_h = self._items[max(0, self._current)].rect.height()
+        current = max(0, self._current)
+        page_h = max(self._items[i].rect.height()
+                     for i in range(self._row_start[current], self._row_end[current] + 1))
         by_height = viewport.height() / ((page_h + MARGIN) * PT_TO_PX)
         return min(by_width, by_height)
 
@@ -507,16 +581,63 @@ class PageView(QGraphicsView):
         return top - (self._tops[self.current_page()] - MARGIN / 2)
 
     def step_page(self, delta: int) -> None:
-        self.go_to_page(self.current_page() + delta)
+        """The next or previous page (or, in a spread, the next or previous pair)."""
+        page = self.current_page()
+        if delta > 0:
+            self.go_to_page(self._row_end[page] + delta if self._items else 0)
+        else:
+            self.go_to_page(self._row_start[page] + delta if self._items else 0)
+
+    # -- Back and Forward ----------------------------------------------------------
+
+    def _here(self) -> tuple[int, float]:
+        return self.current_page(), self.page_offset()
+
+    def jump_to(self, page: int, offset: float = 0.0) -> None:
+        """Go somewhere else in the tome and remember where we were, for Back."""
+        if not self._items:
+            return
+        here = self._here()
+        if not self._back or self._back[-1] != here:
+            self._back.append(here)
+            del self._back[:-HISTORY]
+        self._forward.clear()
+        self.go_to_page(page, offset)
+        self._track_now()
+        self.historyChanged.emit(True, False)
+
+    def can_go_back(self) -> bool:
+        return bool(self._back)
+
+    def can_go_forward(self) -> bool:
+        return bool(self._forward)
+
+    def go_back(self) -> None:
+        if self._back:
+            self._forward.append(self._here())
+            self.go_to_page(*self._back.pop())
+            self._track_now()
+            self.historyChanged.emit(bool(self._back), True)
+
+    def go_forward(self) -> None:
+        if self._forward:
+            self._back.append(self._here())
+            self.go_to_page(*self._forward.pop())
+            self._track_now()
+            self.historyChanged.emit(True, bool(self._forward))
+
+    def _track_now(self) -> None:
+        """Bring the 'current page' up to date at once (it normally follows on a timer)."""
+        self._track_current(self.mapToScene(self.viewport().rect()).boundingRect())
 
     # -- fetching ---------------------------------------------------------------
 
     def _pages_in(self, area: QRectF) -> range:
         if not self._items:
             return range(0)
-        first = max(0, bisect.bisect_right(self._tops, area.top()) - 1)
+        first = self._row_start[max(0, bisect.bisect_right(self._tops, area.top()) - 1)]
         last = min(len(self._items) - 1, bisect.bisect_left(self._tops, area.bottom()))
-        return range(first, last + 1)
+        return range(first, self._row_end[last] + 1)
 
     def _refresh(self) -> None:
         if not self._items or self._session is None:
@@ -545,6 +666,9 @@ class PageView(QGraphicsView):
                     continue
                 clip = item.cell_rect(col, row, scale)
                 wanted[key] = (1 if clip.intersects(visible) else 2, index, clip)
+        for index in pages:  # links are cheap: learn them for whatever is near
+            if index not in self.links and index not in self._link_requests.values():
+                self._link_requests[self._session.query("links", index)] = index
         if pages:
             for index in range(max(0, pages[0] - 4), min(len(self._items), pages[-1] + 5)):
                 key = ("preview", index)
@@ -576,7 +700,7 @@ class PageView(QGraphicsView):
 
     def _track_current(self, view_rect: QRectF) -> None:
         probe = view_rect.top() + min(view_rect.height() / 2, 200.0 / max(self._zoom, 0.01))
-        index = max(0, bisect.bisect_right(self._tops, probe) - 1)
+        index = self._row_start[max(0, bisect.bisect_right(self._tops, probe) - 1)]
         if index != self._current:
             self._current = index
             self.currentPageChanged.emit(index)
@@ -717,6 +841,48 @@ class PageView(QGraphicsView):
             self._update_pages(pages)
             self.objectSelected.emit(target)
 
+    def _link_at(self, page: int, point: QPointF) -> dict | None:
+        for rect, link in self.links.get(page, ()):
+            if rect.contains(point):
+                return link
+        return None
+
+    def _selected_box(self) -> QRectF | None:
+        if self.selected_object is None:
+            return None
+        page, ident = self.selected_object
+        return next((box for i, box, _m in self.object_boxes.get(page, ()) if i == ident), None)
+
+    def _handle_at(self, page: int, point: QPointF) -> str | None:
+        """Which corner handle of the selected object is under `point` ('tl', 'br', ...)."""
+        if not self.resizable or self.selected_object is None \
+                or self.selected_object[0] != page:
+            return None
+        box = self._selected_box()
+        if box is None:
+            return None
+        reach = (HANDLE + 3) / (self._zoom * PT_TO_PX)
+        for name, corner in (("tl", box.topLeft()), ("tr", box.topRight()),
+                             ("bl", box.bottomLeft()), ("br", box.bottomRight())):
+            if abs(point.x() - corner.x()) <= reach and abs(point.y() - corner.y()) <= reach:
+                return name
+        return None
+
+    @staticmethod
+    def _resized(box: QRectF, handle: str, point: QPointF, free: bool) -> QRectF:
+        """`box` with corner `handle` dragged to `point`; proportions kept unless `free`."""
+        fixed = {"tl": box.bottomRight(), "tr": box.bottomLeft(),
+                 "bl": box.topRight(), "br": box.topLeft()}[handle]
+        sign_x = 1 if handle in ("tr", "br") else -1
+        sign_y = 1 if handle in ("bl", "br") else -1
+        width = max(8.0, (point.x() - fixed.x()) * sign_x)
+        height = max(8.0, (point.y() - fixed.y()) * sign_y)
+        if not free and box.width() > 0 and box.height() > 0:
+            scale = max(width / box.width(), height / box.height())
+            width, height = box.width() * scale, box.height() * scale
+        return QRectF(fixed, QPointF(fixed.x() + width * sign_x,
+                                     fixed.y() + height * sign_y)).normalized()
+
     def _object_at(self, page: int, point: QPointF):
         for entry in reversed(self.object_boxes.get(page, ())):
             if entry[1].adjusted(-3, -3, 3, 3).contains(point):
@@ -777,26 +943,29 @@ class PageView(QGraphicsView):
     # -- text selection -------------------------------------------------------------------
 
     def _page_point(self, pos: QPoint, clamp: bool = False):
-        """(page index, point in that page's coordinates) under a viewport position."""
+        """(page index, point in that page's coordinates) under a viewport position.
+
+        With `clamp`, a position off any page is pulled onto the nearest one.
+        """
         if not self._items:
             return None
         scene = self.mapToScene(pos)
-        index = max(0, bisect.bisect_right(self._tops, scene.y()) - 1)
-        item = self._items[index]
-        local = scene - item.pos()
-        if item.rect.contains(local):
-            return index, local
+        last = max(0, bisect.bisect_right(self._tops, scene.y()) - 1)
+        row = range(self._row_start[last], self._row_end[last] + 1)
+        for index in row:
+            item = self._items[index]
+            local = scene - item.pos()
+            if item.rect.contains(local):
+                return index, local
         if not clamp:
             return None
-        if local.y() > item.rect.bottom() and index + 1 < len(self._items):
-            gap_middle = item.rect.bottom() + GAP / 2
-            if local.y() > gap_middle:  # past the gap: belongs to the next page
-                index += 1
-                item = self._items[index]
-                local = scene - item.pos()
-        local = QPointF(min(max(local.x(), 0.0), item.rect.width()),
-                        min(max(local.y(), 0.0), item.rect.height()))
-        return index, local
+        bottom = max(self._items[i].pos().y() + self._items[i].rect.height() for i in row)
+        if scene.y() > bottom + GAP / 2 and row[-1] + 1 < len(self._items):
+            nxt = row[-1] + 1  # past the gap: belongs to the next row
+            row = range(self._row_start[nxt], self._row_end[nxt] + 1)
+        index = min(row, key=lambda i: abs(
+            scene.x() - (self._items[i].pos().x() + self._items[i].rect.width() / 2)))
+        return index, self._clamped(index, pos)
 
     def _clamped(self, page: int, pos: QPoint) -> QPointF:
         """A viewport position as a point on `page`, pulled inside the page's edges."""
@@ -812,6 +981,12 @@ class PageView(QGraphicsView):
             self._word_requests[self._session.words(page)] = page
 
     def _on_reply(self, req_id: int, payload) -> None:
+        if req_id in self._link_requests:
+            page = self._link_requests.pop(req_id)
+            self.links[page] = [
+                (QRectF(x0, y0, x1 - x0, y1 - y0), link)
+                for link in payload for x0, y0, x1, y1 in (link["rect"],)]
+            return
         page = self._word_requests.pop(req_id, None)
         if page is None:
             return
@@ -926,23 +1101,53 @@ class PageView(QGraphicsView):
         self._pending_markup = None
         self._anchor, self._focus = hit, None
         self.preview = self._grab = None
+        self._pressed_link = None
         tool = self.tool
         if hit is None:
             if tool == "pointer":
                 self.select_object(None)
         elif tool in TEXT_TOOLS:
+            if tool == "select":
+                self._pressed_link = self._link_at(*hit)
             self._need_words(hit[0])
         elif tool == "ink":
             self.preview = ("ink", hit[0], [hit[1]])
         elif tool == "pointer":
-            found = self._object_at(*hit)
-            self.select_object((hit[0], found[0]) if found else None)
-            if found and found[2]:
-                self._grab = (hit[0], found[0], QRectF(found[1]), hit[1])
+            handle = self._handle_at(*hit)
+            if handle is not None:  # resize the object that is already selected
+                self._grab = (hit[0], self.selected_object[1], QRectF(self._selected_box()),
+                              hit[1], handle)
+            else:
+                found = self._object_at(*hit)
+                self.select_object((hit[0], found[0]) if found else None)
+                if found and found[2]:
+                    self._grab = (hit[0], found[0], QRectF(found[1]), hit[1], None)
         event.accept()
+
+    def _hover(self, pos: QPoint) -> None:
+        """Show what a click here would do: follow a link, or resize the selection."""
+        hit = self._page_point(pos)
+        shape = None
+        if hit is not None:
+            if self.tool == "select" and self._link_at(*hit) is not None:
+                shape = Qt.CursorShape.PointingHandCursor
+            elif self.tool == "pointer":
+                handle = self._handle_at(*hit)
+                if handle in ("tl", "br"):
+                    shape = Qt.CursorShape.SizeFDiagCursor
+                elif handle in ("tr", "bl"):
+                    shape = Qt.CursorShape.SizeBDiagCursor
+        if shape is None:
+            shape = Qt.CursorShape.IBeamCursor if self.tool in ("select", "edit_text",
+                                                                "add_text") \
+                else Qt.CursorShape.ArrowCursor if self.tool in ("pointer", "form") \
+                else Qt.CursorShape.CrossCursor
+        if self.viewport().cursor().shape() != shape:
+            self.viewport().setCursor(shape)
 
     def mouseMoveEvent(self, event) -> None:
         if self._press_pos is None or not event.buttons() & Qt.MouseButton.LeftButton:
+            self._hover(event.position().toPoint())
             return super().mouseMoveEvent(event)
         pos = event.position().toPoint()
         if not self._selecting and (pos - self._press_pos).manhattanLength() < 4:
@@ -963,8 +1168,13 @@ class PageView(QGraphicsView):
             self.preview[2].append(self._clamped(page, pos))
             self._update_pages([page])
         elif tool == "pointer" and self._grab is not None:
-            moved = self._clamped(page, pos) - self._grab[3]
-            self.preview = ("box", page, self._grab[2].translated(moved))
+            point = self._clamped(page, pos)
+            if self._grab[4] is not None:  # dragging a corner: resize
+                free = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+                box = self._resized(self._grab[2], self._grab[4], point, free)
+            else:
+                box = self._grab[2].translated(point - self._grab[3])
+            self.preview = ("box", page, box)
             self._update_pages([page])
         event.accept()
 
@@ -980,6 +1190,8 @@ class PageView(QGraphicsView):
         if not self._selecting:  # a plain click
             if tool in CLICK_TOOLS:
                 self.pageClicked.emit(tool, page, start, where)
+            elif tool == "select" and self._pressed_link is not None:
+                self.linkActivated.emit(self._pressed_link)
         else:
             self._selecting = False
             if tool in TEXT_TOOLS:

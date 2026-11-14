@@ -29,6 +29,7 @@ class Place:
     name: str
     sort_order: int
     color: str | None
+    collapsed: bool = False  # a shelf shown minimized: just its name and count
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,7 @@ def _now() -> str:
 
 def _place(row) -> Place:
     return Place(row["id"], row["kind"], row["parent_id"], row["name"], row["sort_order"],
-                 row["color"])
+                 row["color"], bool(row["collapsed"]))
 
 
 def _rect(row):
@@ -241,6 +242,13 @@ class Library:
             raise LibraryError("A name cannot be empty.")
         with self.db:
             self.db.execute("UPDATE places SET name = ? WHERE id = ?", (name, place_id))
+        self._changed("places")
+
+    def set_collapsed(self, place_ids, collapsed: bool) -> None:
+        """Minimize shelves (or bring them back) in their bookcase."""
+        with self.db:
+            self.db.executemany("UPDATE places SET collapsed = ? WHERE id = ?",
+                                [(int(collapsed), place_id) for place_id in place_ids])
         self._changed("places")
 
     def set_place_color(self, place_id: int, color: str | None) -> None:

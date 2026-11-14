@@ -34,7 +34,8 @@ def arrange(sections: list[Section], text: str = "", label: str | None = None,
     """Apply the filter box, the Label filter and the sort order.
 
     While a filter is active, sets and shelves left with nothing to show are
-    dropped, so the result reads as a list of matches.
+    dropped and minimized shelves are opened, so the result reads as a list of
+    matches with none of them hidden.
     """
     needle = text.casefold().strip()
     wanted = label.casefold() if label else None
@@ -57,7 +58,9 @@ def arrange(sections: list[Section], text: str = "", label: str | None = None,
             if books or not filtering:
                 groups.append(Group(group.place_id, group.title, books))
         if groups or not filtering:
-            arranged.append(Section(section.place_id, section.title, groups, section.hint))
+            arranged.append(Section(section.place_id, section.title, groups, section.hint,
+                                    section.collapsible,
+                                    section.collapsed and not filtering))
     return arranged
 
 

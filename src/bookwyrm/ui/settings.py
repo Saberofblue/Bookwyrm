@@ -61,6 +61,8 @@ class SettingsDialog(QDialog):
         self.change.clicked.connect(self.change_location)
         show = QPushButton(f"Show in {system.FILE_MANAGER}")
         show.clicked.connect(lambda: system.reveal(library.root))
+        for button in (self.change, show):  # Return closes the window; it must not press these
+            button.setAutoDefault(False)
         location_buttons = QHBoxLayout()
         location_buttons.addWidget(self.change)
         location_buttons.addWidget(show)

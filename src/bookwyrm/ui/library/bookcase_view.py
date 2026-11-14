@@ -49,6 +49,8 @@ class Section:
     title: str
     groups: list[Group] = field(default_factory=list)
     hint: str = "This shelf awaits its first tome."
+    collapsible: bool = False  # may the user minimize it (a shelf within a bookcase)?
+    collapsed: bool = False  # minimized: only its rail shows
 
 
 @dataclass
@@ -68,6 +70,7 @@ class BookcaseView(QAbstractScrollArea):
     booksDropped = Signal(list, int, bool)  # [(book id, from place id)], to place id, copy?
     filesDropped = Signal(list, object)  # paths, place id | None
     removeRequested = Signal(list)  # [(place id, book id)]
+    collapseRequested = Signal(int, bool)  # shelf place id, minimize?
     selectionChanged = Signal()
 
     def __init__(self, cover_path, parent=None):
@@ -187,6 +190,11 @@ class BookcaseView(QAbstractScrollArea):
             count = sum(len(g.books) for g in section.groups)
             self._rails.append((rail, section, count))
             y += RAIL_H
+            if section.collapsed:  # minimized: the rail is all there is (and still takes drops)
+                if section.place_id is not None:
+                    section_zones.append((rail, section.place_id))
+                y += 6
+                continue
             x, row_y = left, y
 
             for group in section.groups:
@@ -324,6 +332,18 @@ class BookcaseView(QAbstractScrollArea):
     def _paint_rail(self, painter, rail, section, count, index) -> None:
         painters.draw_rail(painter, rail, index + 1)
         x = rail.left() + PAD_X
+        if section.collapsible:  # an arrow: pointing right when minimized, down when open
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 235, 205, 190))
+            cx, cy = rail.left() + 14, rail.center().y() + 1
+            if section.collapsed:
+                points = [QPoint(cx - 3, cy - 6), QPoint(cx + 5, cy), QPoint(cx - 3, cy + 6)]
+            else:
+                points = [QPoint(cx - 6, cy - 3), QPoint(cx + 6, cy - 3), QPoint(cx, cy + 5)]
+            painter.drawPolygon(points)
+            painter.restore()
         if section.title:
             width = min(painters.plaque_width(section.title, 13), rail.width() - 2 * PAD_X - 90)
             painters.draw_plaque(painter, QRect(x, rail.top() + 7, width, 24), section.title, 13)
@@ -353,6 +373,14 @@ class BookcaseView(QAbstractScrollArea):
         for slot in self._slots:
             if slot.rect.adjusted(-2, -8, 2, PLANK_H).contains(point):
                 return slot
+        return None
+
+    def _rail_at(self, pos: QPoint) -> Section | None:
+        """The shelf whose nameplate rail is under a viewport position, if it can minimize."""
+        point = self._content_pos(pos)
+        for rail, section, _count in self._rails:
+            if section.collapsible and rail.contains(point):
+                return section
         return None
 
     def _zone_at(self, pos: QPoint) -> tuple[QRect, int] | None:
@@ -394,6 +422,10 @@ class BookcaseView(QAbstractScrollArea):
         if event.button() != Qt.MouseButton.LeftButton:
             return super().mousePressEvent(event)
         self.setFocus()
+        rail = self._rail_at(event.position().toPoint())
+        if rail is not None:  # clicking a shelf's rail minimizes it or brings it back
+            self.collapseRequested.emit(rail.place_id, not rail.collapsed)
+            return
         slot = self._slot_at(event.position().toPoint())
         self._press_pos = event.position().toPoint() if slot else None
         if slot is None:
@@ -419,10 +451,11 @@ class BookcaseView(QAbstractScrollArea):
                 return
         slot = self._slot_at(pos)
         key = slot.key if slot else None
+        on_rail = self._rail_at(pos) is not None
+        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if slot or on_rail
+                                  else Qt.CursorShape.ArrowCursor)
         if key != self._hover:
             self._hover = key
-            self.viewport().setCursor(Qt.CursorShape.PointingHandCursor if slot
-                                      else Qt.CursorShape.ArrowCursor)
             self.viewport().update()
 
     def leaveEvent(self, event) -> None:
@@ -447,7 +480,13 @@ class BookcaseView(QAbstractScrollArea):
     def viewportEvent(self, event) -> bool:
         if event.type() == QEvent.Type.ToolTip:
             slot = self._slot_at(event.pos())
-            if slot is None:
+            rail = self._rail_at(event.pos())
+            if slot is None and rail is not None:
+                QToolTip.showText(
+                    event.globalPos(),
+                    "Click to show this shelf's tomes" if rail.collapsed
+                    else "Click to minimize this shelf", self.viewport())
+            elif slot is None:
                 QToolTip.hideText()
             else:
                 book = slot.book

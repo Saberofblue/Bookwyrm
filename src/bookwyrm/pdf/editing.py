@@ -966,3 +966,49 @@ def op_insert_image(editor: Editor, page: int, rect, path: str) -> Outcome:
         raise EditError("That file could not be read as a picture.") from exc
     target.insert_image(pymupdf.Rect(*rect).normalize(), xref=xref, keep_proportion=True)
     return Outcome([page])
+
+
+# ======================================================================================
+# Reading aids: links and printed page numbers (nothing here changes the tome)
+# ======================================================================================
+
+def list_links(doc, page: int) -> list[dict]:
+    """Clickable areas on a page: jumps inside the tome, and web addresses.
+
+    Each entry has "rect" and either "page" (0-based) with "y" (how far down that
+    page to land, in points) or "uri". Links to other files are left out.
+    """
+    count = doc.page_count
+    found = []
+    for link in doc[page].get_links():
+        rect = link.get("from")
+        if rect is None or rect.is_empty:
+            continue
+        entry = {"rect": (rect.x0, rect.y0, rect.x1, rect.y1)}
+        kind = link.get("kind")
+        target = link.get("page", -1)
+        if kind in (pymupdf.LINK_GOTO, pymupdf.LINK_NAMED) and isinstance(target, int) \
+                and 0 <= target < count:
+            spot = link.get("to")
+            entry["page"] = target
+            entry["y"] = max(0.0, float(spot.y)) if hasattr(spot, "y") else 0.0
+        elif kind == pymupdf.LINK_URI and link.get("uri"):
+            entry["uri"] = str(link["uri"])
+        else:
+            continue
+        found.append(entry)
+    return found
+
+
+def page_labels(doc) -> list[str] | None:
+    """The page number printed on each page ("iv", "86", "A-3"), if the tome records them.
+
+    PDFs can say that, for instance, the seventh sheet is page "1". Returns one label
+    per page, or None when the tome carries no such numbering.
+    """
+    try:
+        if not doc.get_page_labels():
+            return None
+        return [doc[number].get_label() or str(number + 1) for number in range(doc.page_count)]
+    except Exception:
+        return None

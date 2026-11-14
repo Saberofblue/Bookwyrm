@@ -205,6 +205,7 @@ class Scriptorium(QObject):
         if tool != self._tool and "picture" in (tool, self._tool):
             self.view.object_boxes = {}  # the pointer now picks a different kind of thing
         self._tool = tool
+        self.view.resizable = tool == "picture"  # pictures get corner handles
         self.view.set_tool("pointer" if tool == "picture" else tool)
         if tool != "form":
             self.view.clear_field_boxes()

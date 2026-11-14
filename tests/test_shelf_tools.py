@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, Qt
 
 from bookwyrm.db.repo import Book, Library
 from bookwyrm.library.importer import Importer
@@ -183,6 +183,19 @@ def test_list_view_shows_the_same_tomes(qtbot, library, page, shelf):
     with qtbot.waitSignal(page.openBook) as opened:
         page.list._activated(heliana, 0)
     assert opened.args == [books["Heliana's Guide"].id]
+    def listed():
+        return [page.list.topLevelItem(i).text(0) for i in range(page.list.topLevelItemCount())]
+    for key, expected in (("title", ["Crafting Catalogue", "Heliana's Guide",
+                                     "Motes of the Divine"]),
+                          ("shelf", ["Motes of the Divine", "Heliana's Guide",
+                                     "Crafting Catalogue"])):
+        page.sort_box.setCurrentIndex(page.sort_box.findData(key))
+        page._sort_chosen(0)
+        assert listed() == expected  # the list follows the Sort menu
+    page.list.sortByColumn(2, Qt.SortOrder.DescendingOrder)  # ...until a heading is clicked
+    assert listed() == ["Crafting Catalogue", "Heliana's Guide", "Motes of the Divine"]
+    page._show()
+    assert listed() == ["Crafting Catalogue", "Heliana's Guide", "Motes of the Divine"]
     page.filter_box.setText("crafting")
     assert page.list.topLevelItemCount() == 1
     page.list_button.setChecked(False)
@@ -239,3 +252,87 @@ def test_preferences_have_typed_defaults(qapp):
     assert prefs.get("startup/reopen") is False and prefs.get("shelves/cover_height") == 200
     with pytest.raises(KeyError):
         prefs.put("no/such", 1)
+
+
+# ---- minimizing shelves ----------------------------------------------------------------------
+
+def test_a_shelf_can_be_minimized_and_brought_back(qtbot, library, page):
+    case = library.add_place("bookcase", "D&D")
+    hunts = library.add_place("shelf", "Hunts", case.id)
+    rules = library.add_place("shelf", "Rules", case.id)
+    for n, (title, shelf) in enumerate([("Heliana", hunts), ("Motes", hunts), ("PHB", rules)], 1):
+        add_book(library, n, title, shelf.id)
+    qtbot.wait(30)
+    page.show_key(("place", case.id))
+    view = page.view
+    assert sorted(shown(page)) == ["Heliana", "Motes", "PHB"]
+    full_height = view._content_h
+    assert all(section.collapsible for _rail, section, _count in view._rails)
+
+    rail = next(rail for rail, section, _ in view._rails if section.title == "Hunts")
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=rail.center())
+    qtbot.wait(30)
+    assert library.place(hunts.id).collapsed and not library.place(rules.id).collapsed
+    assert shown(page) == ["PHB"] and view._content_h < full_height
+    counts = {section.title: count for _rail, section, count in view._rails}
+    assert counts == {"Hunts": 2, "Rules": 1}  # the minimized shelf still says what it holds
+    assert "3 tomes" in page.subheading.text()
+
+    page.filter_box.setText("motes")  # a filter looks inside minimized shelves too
+    assert shown(page) == ["Motes"]
+    page.filter_box.setText("")
+
+    rail = next(rail for rail, section, _ in view._rails if section.title == "Hunts")
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=rail.center())
+    qtbot.wait(30)
+    assert not library.place(hunts.id).collapsed and len(shown(page)) == 3
+
+    library.set_collapsed([hunts.id, rules.id], True)  # "Minimize All Shelves"
+    qtbot.wait(30)
+    assert shown(page) == [] and len(view._rails) == 2
+    page.show_key(("place", hunts.id))  # looking at one shelf on its own always shows it
+    assert sorted(shown(page)) == ["Heliana", "Motes"]
+    assert not view._rails[0][1].collapsible
+
+
+def test_tomes_can_be_dropped_on_a_minimized_shelf(qtbot, library, page):
+    case = library.add_place("bookcase", "D&D")
+    hunts = library.add_place("shelf", "Hunts", case.id)
+    library.set_collapsed([hunts.id], True)
+    qtbot.wait(30)
+    page.show_key(("place", case.id))
+    rail = page.view._rails[0][0]
+    assert page.view._zone_at(rail.center())[1] == hunts.id
+
+
+def test_an_older_catalogue_is_upgraded_in_place(tmp_path):
+    import sqlite3
+    from importlib import resources
+
+    from bookwyrm.db import database
+    root = tmp_path / "old"
+    (root / "books").mkdir(parents=True)
+    schema = resources.files("bookwyrm.db").joinpath("schema.sql").read_text("utf-8")
+    version_one = "\n".join(line for line in schema.splitlines() if "collapsed" not in line)
+    con = sqlite3.connect(root / "bookwyrm.db")
+    con.executescript(version_one)
+    con.execute("INSERT INTO places (kind, name) VALUES ('bookcase', 'From before')")
+    con.execute("PRAGMA user_version = 1")
+    con.commit()
+    con.close()
+
+    library = Library(root)  # opening it upgrades it
+    assert library.db.execute("PRAGMA user_version").fetchone()[0] == database.SCHEMA_VERSION
+    case = library.places()[0]
+    assert case.name == "From before" and case.collapsed is False
+    shelf = library.add_place("shelf", "New", case.id)
+    library.set_collapsed([shelf.id], True)
+    assert library.place(shelf.id).collapsed
+    library.close()
+
+    con = sqlite3.connect(root / "bookwyrm.db")
+    con.execute("PRAGMA user_version = 99")  # as if a later Bookwyrm had made it
+    con.commit()
+    con.close()
+    with pytest.raises(RuntimeError, match="newer Bookwyrm"):
+        Library(root)

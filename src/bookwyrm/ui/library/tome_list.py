@@ -43,7 +43,9 @@ class TomeList(QTreeWidget):
         self.setAlternatingRowColors(True)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setSortingEnabled(True)
-        self.header().setSortIndicatorShown(False)  # until a header is clicked, keep our order
+        # No column chosen: rows keep the order they are given (the Sort menu's order)
+        # until the user clicks a column heading.
+        self.header().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
@@ -51,7 +53,6 @@ class TomeList(QTreeWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, len(COLUMNS)):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        header.sectionClicked.connect(lambda _column: header.setSortIndicatorShown(True))
         self.itemDoubleClicked.connect(self._activated)
         self.itemSelectionChanged.connect(self.selectionChanged)
 
@@ -63,6 +64,7 @@ class TomeList(QTreeWidget):
             self._empty_text = empty_text
         labels_by_book = labels_by_book or {}
         chosen = set(self.selected())
+        column, order = self.sortColumn(), self.header().sortIndicatorOrder()
         self.setSortingEnabled(False)  # fill in the given order
         self.clear()
         for section in sections:
@@ -82,9 +84,8 @@ class TomeList(QTreeWidget):
                         row.setText(0, f"{book.title}  (cataloguing…)")
                     if (group.place_id, book.id) in chosen:
                         row.setSelected(True)
+        self.header().setSortIndicator(column, order)  # -1 = leave the given order alone
         self.setSortingEnabled(True)
-        if not self.header().isSortIndicatorShown():
-            self.sortByColumn(-1, Qt.SortOrder.AscendingOrder)  # leave the given order alone
 
     def _rows(self) -> list[QTreeWidgetItem]:
         return [self.topLevelItem(i) for i in range(self.topLevelItemCount())]
