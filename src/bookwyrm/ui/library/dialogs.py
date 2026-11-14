@@ -202,6 +202,18 @@ def _size_text(size: int) -> str:
     return f"{max(1, size // 1024)} KB"
 
 
+def searchable_text(book: Book) -> str:
+    """How much of a tome the Card Catalogue can search, in a sentence."""
+    if not book.ready or not book.indexed or book.text_pages is None:
+        return "Searchable text: still being read"
+    if book.text_pages == 0:
+        return ("Searchable text: none. Its pages are pictures, with no text in them, so "
+                "the Card Catalogue cannot search it")
+    if book.text_pages >= book.page_count:
+        return "Searchable text: on every page"
+    return f"Searchable text: on {book.text_pages} of {book.page_count} pages"
+
+
 class TomeDetailsDialog(QDialog):
     """Edit a tome's title, author, labels and notes."""
 
@@ -231,6 +243,7 @@ class TomeDetailsDialog(QDialog):
         facts = QLabel(
             f"{book.page_count} pages · {_size_text(book.file_size)} · "
             f"added {book.added_at[:10]}<br>"
+            f"{searchable_text(book)}<br>"
             f"Shelved in: {'; '.join(shelved) if shelved else 'Returns Cart (not shelved)'}<br>"
             f"File: {library.book_file(book)}"
         )

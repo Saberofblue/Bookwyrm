@@ -15,7 +15,7 @@ from pathlib import Path
 
 # Everything Bookwyrm keeps in a library folder. Anything else found there is left alone.
 OWNED = ("bookwyrm.db", "bookwyrm.db-wal", "bookwyrm.db-shm", "books", "covers", "excerpts",
-         "bookwyrm.log", "bookwyrm.log.old")
+         "bookwyrm.log", "bookwyrm.log.old", "bookwyrm-before-upgrade.db")
 FOLDER_NAME = "Bookwyrm Library"
 
 

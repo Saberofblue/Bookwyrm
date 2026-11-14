@@ -1,5 +1,6 @@
--- Bookwyrm catalogue, schema version 2.
--- (Version 2 added places.collapsed; database.py upgrades older catalogues in place.)
+-- Bookwyrm catalogue, schema version 3.
+-- (Version 2 added places.collapsed; version 3 added books.text_pages and page_labels.
+-- database.py upgrades older catalogues in place.)
 
 CREATE TABLE books (
     id              INTEGER PRIMARY KEY,
@@ -19,6 +20,7 @@ CREATE TABLE books (
     notes           TEXT    NOT NULL DEFAULT '',
     ready           INTEGER NOT NULL DEFAULT 0,    -- 1 once the file is in the library
     indexed         INTEGER NOT NULL DEFAULT 0,    -- 1 once pages_fts holds its text
+    text_pages      INTEGER,                       -- pages found to hold text; NULL = not counted
     edited          INTEGER NOT NULL DEFAULT 0     -- 1 once an archive copy exists
 );
 
@@ -78,6 +80,10 @@ CREATE TABLE ribbons (
     created_at  TEXT    NOT NULL
 );
 CREATE INDEX ribbons_book ON ribbons(book_id, page);
+
+-- The numbers printed on a tome's pages, as a JSON list with one entry per page ("iv", "86").
+-- An empty list means the tome was examined and records none; no row means not yet examined.
+CREATE TABLE page_labels (book_id INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE, labels TEXT NOT NULL);
 
 -- One row per page of text; page is 0-based.
 CREATE VIRTUAL TABLE pages_fts USING fts5(

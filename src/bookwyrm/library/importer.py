@@ -1,8 +1,9 @@
 """Brings PDFs into the library and keeps the search index filled.
 
 Orchestrates the worker process: inspect (hash + facts) -> copy into the
-library and render a cover -> extract page text for the Card Catalogue. All
-catalogue writes happen here, on the GUI side, so there is a single writer.
+library and render a cover -> extract page text for the Card Catalogue, and
+note the numbers printed on the pages. All catalogue writes happen here, on
+the GUI side, so there is a single writer.
 """
 
 from __future__ import annotations
@@ -76,6 +77,13 @@ class Importer(QObject):
         self.library.discard_unfinished()
         for book in self.library.unindexed_books():
             self.reindex(book.id)
+        # Tomes added before Bookwyrm kept printed page numbers: look for theirs now. (A tome
+        # being read again above reports its numbers when the reading is done.)
+        reading = {state.get("book_id") for state in self._jobs.values()}
+        for book in self.library.books_without_page_labels():
+            if book.id not in reading:
+                self._start({"kind": "labels", "book_id": book.id},
+                            ("labels", str(self.library.book_file(book))))
 
     def forget(self, book_id: int) -> None:
         """Stop working on a tome (it is being removed or re-read)."""
@@ -145,7 +153,12 @@ class Importer(QObject):
         elif op == "indexed":
             del self._jobs[job]
             if self.library.book(state["book_id"]) is not None:
+                self.library.set_page_labels(state["book_id"], msg[3] if len(msg) > 3 else None)
                 self.library.set_indexed(state["book_id"], True)
+        elif op == "labels":
+            del self._jobs[job]
+            if self.library.book(state["book_id"]) is not None:
+                self.library.set_page_labels(state["book_id"], msg[2])
         elif op == "job_failed":
             del self._jobs[job]
             self._failed(state, msg[2])

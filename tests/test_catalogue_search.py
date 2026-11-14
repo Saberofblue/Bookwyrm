@@ -427,7 +427,7 @@ def test_a_result_can_narrow_the_search_to_its_tome(catalogue, shelves):
     almanac = tome_rows(catalogue)["Almanac"]
     menu = catalogue.menu_for(almanac)
     assert [action.text() for action in menu.actions()] == [
-        "Open at the Best Match", "Search Only This Tome"]
+        "Open at the Best Match", "Search Only This Tome", "Pin to Study Table"]
     menu.actions()[1].trigger()
     assert catalogue.scope() == scope_of(books=[shelves["small"].id])
     assert set(tome_rows(catalogue)) == {"Almanac"}

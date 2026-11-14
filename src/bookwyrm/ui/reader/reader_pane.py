@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from bookwyrm.db.repo import LibraryError
 from bookwyrm.ui import prefs
 from bookwyrm.ui.editor.scriptorium import Scriptorium
-from bookwyrm.ui.extras.boards import image_bytes, thumbnail_bytes
+from bookwyrm.ui.extras.boards import image_bytes, section_title, thumbnail_bytes
 from bookwyrm.ui.keys import hint, menu_text
 from bookwyrm.ui.library import dialogs
 from bookwyrm.ui.reader.find_bar import FindBar
@@ -331,13 +331,7 @@ class ReaderPane(QWidget):
 
     def _section_title(self, page: int) -> str:
         """The contents entry that covers `page`, as a suggested ribbon name."""
-        title = ""
-        for _level, text, number, *_rest in (self.session.info or {}).get("toc", []):
-            if number - 1 <= page:
-                title = str(text).strip()
-            else:
-                break
-        return title
+        return section_title((self.session.info or {}).get("toc"), page)
 
     def toggle_ribbon(self) -> None:
         if self.library is None or not self.view.page_count():

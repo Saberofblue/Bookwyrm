@@ -20,6 +20,11 @@ PDF **copies** it there; the file you added is never changed. **Settings** (⌘,
 button under the bookcase list) lets you keep the library somewhere else: Bookwyrm can
 move everything there, or switch to a library that is already there.
 
+A newer Bookwyrm upgrades a library's catalogue the first time it opens it, and older
+versions cannot open it afterwards. A copy of the catalogue as it was is kept in the
+library folder as `bookwyrm-before-upgrade.db`; to go back to an older version, quit
+Bookwyrm and put that copy in place of `bookwyrm.db`.
+
 Shortcuts below are written for a Mac. On Windows use **Ctrl** for ⌘, **Shift** for ⇧
 and **Alt** for ⌥; the tooltips inside the app always show the right keys for your system.
 
@@ -59,6 +64,12 @@ In the Card Catalogue:
 - Tomes can be listed best match first, most pages first, or by title.
 - Words typed without quotes must all be on the page; pages where they stand together
   come first. Put a phrase in "quotes" to require it exactly.
+- Results name pages by the number printed on them where a tome records one, as the
+  reader does.
+- **Right-click a result** to pin its page to a Study Table without opening the tome.
+- A tome whose pages are pictures (a scan with no text in it) cannot be searched. The
+  catalogue says which tomes those are, their covers carry a small crossed-out magnifying
+  glass, and a tome's Details say how many of its pages hold text.
 
 ## Reading
 

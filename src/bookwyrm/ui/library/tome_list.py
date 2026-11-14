@@ -8,7 +8,7 @@ from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
 from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTreeWidget, QTreeWidgetItem
 
 from bookwyrm.db.repo import Book
-from bookwyrm.ui.library.bookcase_view import MIME_BOOKS, Section
+from bookwyrm.ui.library.bookcase_view import MIME_BOOKS, NO_TEXT_NOTE, Section
 
 ROLE = Qt.ItemDataRole.UserRole
 COLUMNS = ("Title", "Author", "Pages", "Where", "Added", "Last read", "Labels")
@@ -77,7 +77,8 @@ class TomeList(QTreeWidget):
                         ", ".join(labels_by_book.get(book.id, ())),
                     ])
                     row.setData(0, ROLE, (group.place_id, book))
-                    row.setToolTip(0, book.title)
+                    row.setToolTip(0, f"{book.title}\n{NO_TEXT_NOTE}" if book.unsearchable
+                                   else book.title)
                     row.setTextAlignment(2, Qt.AlignmentFlag.AlignRight
                                          | Qt.AlignmentFlag.AlignVCenter)
                     if not book.ready:

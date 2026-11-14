@@ -126,6 +126,17 @@ def page_texts(pymupdf, pdf_path: str):
         doc.close()
 
 
+def printed_labels(pymupdf, pdf_path: str) -> list[str] | None:
+    """The number printed on each page of a tome ("iv", "86"), or None if it records none."""
+    from bookwyrm.pdf.editing import page_labels  # needs PyMuPDF, loaded by now
+
+    doc = pymupdf.open(pdf_path)
+    try:
+        return None if doc.needs_pass else page_labels(doc)
+    finally:
+        doc.close()
+
+
 def serve(conn) -> None:
     import pymupdf
 
@@ -135,7 +146,13 @@ def serve(conn) -> None:
     quick: deque = deque()  # inspect / ingest requests
     slow: deque = deque()  # index requests waiting their turn
     cancelled: set[int] = set()
-    running = None  # (job, generator) of the index in progress
+    running = None  # (job, generator, path) of the index in progress
+
+    def labels_of(path: str):
+        try:
+            return printed_labels(pymupdf, path)
+        except Exception:
+            return None  # the text was read; the page numbers are a nicety
 
     def pump(block: bool) -> bool:
         """Read waiting requests. Returns False when asked to close."""
@@ -168,16 +185,18 @@ def serve(conn) -> None:
                 elif op == "ingest":
                     ingest(pymupdf, msg[2], msg[3], msg[4])
                     conn.send(("ingested", job))
+                elif op == "labels":
+                    conn.send(("labels", job, printed_labels(pymupdf, msg[2])))
             except Exception as exc:
                 conn.send(("job_failed", job, f"{type(exc).__name__}: {exc}"))
             continue
         if running is None and slow:
             msg = slow.popleft()
             if msg[1] not in cancelled:
-                running = (msg[1], page_texts(pymupdf, msg[2]))
+                running = (msg[1], page_texts(pymupdf, msg[2]), msg[2])
             continue
         if running is not None:
-            job, batches = running
+            job, batches, path = running
             if job in cancelled:
                 batches.close()
                 running = None
@@ -189,10 +208,10 @@ def serve(conn) -> None:
                 if not batch or batch[-1][0] >= count - 1:
                     batches.close()
                     running = None
-                    conn.send(("indexed", job, count))
+                    conn.send(("indexed", job, count, labels_of(path)))
             except StopIteration:
                 running = None
-                conn.send(("indexed", job, 0))
+                conn.send(("indexed", job, 0, labels_of(path)))
             except Exception as exc:
                 running = None
                 conn.send(("job_failed", job, f"{type(exc).__name__}: {exc}"))

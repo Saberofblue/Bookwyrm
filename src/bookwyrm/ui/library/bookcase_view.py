@@ -20,6 +20,7 @@ from bookwyrm.db.repo import Book
 from bookwyrm.ui.theme import icons, painters, palette, theme
 
 MIME_BOOKS = "application/x-bookwyrm-books"
+NO_TEXT_NOTE = "Cannot be searched: its pages are pictures, with no text in them"
 
 COVER_H = 172
 GAP = 18
@@ -306,6 +307,8 @@ class BookcaseView(QAbstractScrollArea):
                 painter.setFont(theme.body_font(12, italic=True))
                 painter.setPen(QColor(palette.FROST_300))
                 painter.drawText(lifted, Qt.AlignmentFlag.AlignCenter, "Cataloguing…")
+            elif slot.book.unsearchable:
+                painters.draw_no_text_mark(painter, lifted)
             label = QRect(rect.left() - 6, rect.bottom() + 1, rect.width() + GAP - 6, PLANK_H)
             painter.setFont(title_font)
             text = metrics.elidedText(slot.book.title, Qt.TextElideMode.ElideRight, label.width())
@@ -494,6 +497,8 @@ class BookcaseView(QAbstractScrollArea):
                 if book.author:
                     lines.append(book.author)
                 lines.append(f"{book.page_count} pages")
+                if book.unsearchable:
+                    lines.append(f"<i>{NO_TEXT_NOTE}</i>")
                 QToolTip.showText(event.globalPos(), "<br>".join(lines), self.viewport())
             return True
         return super().viewportEvent(event)

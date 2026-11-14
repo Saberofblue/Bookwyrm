@@ -6,6 +6,7 @@ Qt-free so it can be tested and reused anywhere. Interested parties call
 
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -51,6 +52,13 @@ class Book:
     ready: bool
     indexed: bool
     edited: bool
+    text_pages: int | None = None  # pages found to hold text; None until the tome is read
+
+    @property
+    def unsearchable(self) -> bool:
+        """Read from end to end and found to hold no text: its pages are pictures (a scan),
+        so the Card Catalogue can never find anything in it."""
+        return self.ready and self.indexed and self.text_pages == 0
 
 
 @dataclass(frozen=True)
@@ -122,7 +130,7 @@ def _book(row) -> Book:
         added_at=row["added_at"], last_opened_at=row["last_opened_at"],
         last_page=row["last_page"], last_offset=row["last_offset"], last_zoom=row["last_zoom"],
         last_zoom_mode=row["last_zoom_mode"], notes=row["notes"], ready=bool(row["ready"]),
-        indexed=bool(row["indexed"]), edited=bool(row["edited"]),
+        indexed=bool(row["indexed"]), edited=bool(row["edited"]), text_pages=row["text_pages"],
     )
 
 
@@ -134,6 +142,7 @@ class Library:
         self.db = database.connect(self.root / "bookwyrm.db")
         self._listeners: list = []
         self._rows: search.RowMap | None = None  # see _row_map()
+        self._printed: dict[int, list[str] | None] = {}  # page labels already looked up
 
     def close(self) -> None:
         """Close the catalogue, folding its write-ahead log into the one database file
@@ -147,7 +156,8 @@ class Library:
     # -- change notification ------------------------------------------------
 
     def subscribe(self, callback) -> None:
-        """callback(what) with what in {'places', 'books', 'ribbons', 'tables', 'excerpts'}."""
+        """callback(what) with what in {'places', 'books', 'ribbons', 'tables', 'excerpts',
+        'page_labels'}."""
         self._listeners.append(callback)
 
     def unsubscribe(self, callback) -> None:
@@ -354,6 +364,7 @@ class Library:
             self.db.execute("DELETE FROM pages_fts WHERE book_id = ?", (book_id,))
             self.db.execute("DELETE FROM books WHERE id = ?", (book_id,))
         self._rows = None  # freed rows may be reused by other text
+        self._printed.pop(book_id, None)
         shutil.rmtree(self.book_dir(book_id), ignore_errors=True)
         self.cover_file(book_id).unlink(missing_ok=True)
         self._changed("books")
@@ -674,22 +685,76 @@ class Library:
 
     def add_page_text(self, book_id: int, pages) -> None:
         """pages: iterable of (0-based page, text)."""
+        pages = list(pages)
+        with_text = sum(1 for _page, text in pages if database.has_text(text))
         with self.db:
             self.db.executemany(
                 "INSERT INTO pages_fts (text, book_id, page) VALUES (?, ?, ?)",
                 [(text, book_id, page) for page, text in pages],
             )
+            self.db.execute(
+                "UPDATE books SET text_pages = COALESCE(text_pages, 0) + ? WHERE id = ?",
+                (with_text, book_id))
 
     def clear_text(self, book_id: int) -> None:
         with self.db:
             self.db.execute("DELETE FROM pages_fts WHERE book_id = ?", (book_id,))
-            self.db.execute("UPDATE books SET indexed = 0 WHERE id = ?", (book_id,))
+            self.db.execute("UPDATE books SET indexed = 0, text_pages = NULL WHERE id = ?",
+                            (book_id,))
         self._rows = None  # freed rows may be reused by other text
 
     def set_indexed(self, book_id: int, indexed: bool = True) -> None:
+        """Record that a tome's text has all been read (a tome with no text at all then
+        counts as having none, rather than as not yet counted)."""
         with self.db:
             self.db.execute("UPDATE books SET indexed = ? WHERE id = ?", (int(indexed), book_id))
+            if indexed:
+                self.db.execute(
+                    "UPDATE books SET text_pages = COALESCE(text_pages, 0) WHERE id = ?",
+                    (book_id,))
         self._changed("books")
+
+    # -- the numbers printed on pages ---------------------------------------------------
+
+    def set_page_labels(self, book_id: int, labels) -> None:
+        """Keep the numbers a tome prints on its pages (one per page), or None/empty
+        when it records none. Either way the tome then counts as examined."""
+        labels = [str(label) for label in labels] if labels else []
+        with self.db:
+            self.db.execute(
+                """INSERT INTO page_labels (book_id, labels) VALUES (?, ?)
+                   ON CONFLICT(book_id) DO UPDATE SET labels = excluded.labels""",
+                (book_id, json.dumps(labels, ensure_ascii=False)))
+        self._printed.pop(book_id, None)
+        self._changed("page_labels")
+
+    def page_labels(self, book_id: int) -> list[str] | None:
+        """The number printed on each page of a tome, or None if it records none (or has
+        not been examined yet)."""
+        if book_id not in self._printed:
+            row = self.db.execute("SELECT labels FROM page_labels WHERE book_id = ?",
+                                  (book_id,)).fetchone()
+            try:
+                labels = json.loads(row[0]) if row else None
+            except ValueError:
+                labels = None
+            self._printed[book_id] = labels or None
+        return self._printed[book_id]
+
+    def printed_page(self, book_id: int, page: int) -> str:
+        """What to call a page: the number printed on it where the tome records one,
+        otherwise its position in the file, counted from 1."""
+        labels = self.page_labels(book_id)
+        if labels and 0 <= page < len(labels) and labels[page]:
+            return labels[page]
+        return str(page + 1)
+
+    def books_without_page_labels(self) -> list[Book]:
+        """Tomes in the library whose printed page numbers have never been looked for."""
+        rows = self.db.execute(
+            """SELECT * FROM books WHERE ready = 1
+               AND id NOT IN (SELECT book_id FROM page_labels) ORDER BY id""")
+        return [_book(r) for r in rows]
 
     def unindexed_books(self) -> list[Book]:
         rows = self.db.execute("SELECT * FROM books WHERE ready = 1 AND indexed = 0 ORDER BY id")

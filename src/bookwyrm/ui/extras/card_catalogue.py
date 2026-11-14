@@ -16,7 +16,7 @@ import re
 import time
 
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPixmap
+from PySide6.QtGui import QColor, QCursor, QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -35,11 +35,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from bookwyrm.db.repo import Library
+from bookwyrm.db.repo import Library, LibraryError
 from bookwyrm.ui import prefs
 from bookwyrm.ui.extras import search_scope
+from bookwyrm.ui.extras.boards import PagePinner
 from bookwyrm.ui.extras.search_scope import Scope, ScopePicker
 from bookwyrm.ui.keys import menu_text
+from bookwyrm.ui.library import dialogs
 from bookwyrm.ui.theme import icons, palette
 
 ROLE = Qt.ItemDataRole.UserRole  # (book id, 0-based page, text to highlight): where a click leads
@@ -194,9 +196,11 @@ class ResultDelegate(QStyledItemDelegate):
         font = QFont(option.font)
         strong = QFont(font)
         strong.setBold(True)
-        page = index.data(ROLE)[1]
+        book_id, page, _needle = index.data(ROLE)
         column = QFontMetrics(font).horizontalAdvance("p. 0000") + 14
-        self._text(painter, area.left(), area, f"p. {page + 1}", font, palette.FROST_300)
+        self._text(painter, area.left(),
+                   QRect(area.left(), area.top(), column - 6, area.height()),
+                   self.owner.page_text(book_id, page), font, palette.FROST_300)
         snippet = index.data(SNIPPET)
         if snippet is None:
             self.owner.want_excerpt(index)  # made after this paint; the row is redrawn then
@@ -219,10 +223,14 @@ class ResultDelegate(QStyledItemDelegate):
 
 class CardCatalogue(QWidget):
     openRequested = Signal(int, int, str)  # book id, 0-based page, text to highlight
+    notice = Signal(str)  # a short message for the status bar
 
     def __init__(self, library: Library, parent=None):
         super().__init__(parent)
         self.library = library
+        self.pinner = PagePinner(library, self)
+        self.pinner.pinned.connect(self._pinned)
+        self._blind: list[int] = []  # tomes within reach that hold no text to search
         self._scope = Scope()  # where to search; empty means every tome
         self._query = ""  # the words the listed results answer
         self._found: dict = {}  # book id -> TomeHits of the listed results
@@ -259,6 +267,14 @@ class CardCatalogue(QWidget):
 
         self.summary = QLabel("", self)
         self.summary.setObjectName("subheading")
+        self.note = QLabel("", self)  # tomes that cannot be searched; see _show_note()
+        self.note.setObjectName("catalogueNote")
+        self.note.setWordWrap(True)
+        self.note.setToolTip(
+            "Scanned books are often saved as pictures of their pages. Bookwyrm can show "
+            "such a tome, but it holds no words to search.")
+        self.note.linkActivated.connect(lambda _link: self._which_cannot_be_searched())
+        self.note.hide()
 
         self.results = QTreeWidget(self)
         self.results.setHeaderHidden(True)
@@ -288,7 +304,9 @@ class CardCatalogue(QWidget):
         layout.addLayout(top)
         layout.addLayout(narrow)
         self.summary.setContentsMargins(24, 0, 24, 8)
+        self.note.setContentsMargins(24, 0, 24, 8)
         layout.addWidget(self.summary)
+        layout.addWidget(self.note)
         layout.addWidget(self.results, 1)
 
         self._timer = QTimer(self, singleShot=True, interval=180)
@@ -358,6 +376,8 @@ class CardCatalogue(QWidget):
     def library_changed(self, what: str) -> None:
         if what == "books":
             self._covers.clear()  # a cover may have been redrawn, or its tome removed
+        elif what == "page_labels":
+            self.results.viewport().update()  # page numbers may now be the printed ones
 
     # -- searching ----------------------------------------------------------------------
 
@@ -386,6 +406,7 @@ class CardCatalogue(QWidget):
         chosen = search_scope.books_in(self.library, self._scope)
         within = books if chosen is None else [b for b in books if b.id in chosen]
         waiting = sum(1 for b in within if b.ready and not b.indexed)
+        self._show_note(within)
         if not books:
             self.summary.setText("The catalogue is empty until the library holds some tomes.")
             return
@@ -419,6 +440,7 @@ class CardCatalogue(QWidget):
         tomes = [tome for tome in self.library.search_tomes(query, chosen, PER_TOME)
                  if tome.book_id in books]
         self._clear()
+        self._show_note([b for b in books.values() if chosen is None or b.id in chosen])
         where = self._where()
         if not tomes:
             self.summary.setText(f"No page in {where} mentions “{query}”.")
@@ -450,6 +472,11 @@ class CardCatalogue(QWidget):
 
     def _needle(self, hit) -> str:
         return find_needle(self._query, hit.phrase)
+
+    def page_text(self, book_id: int, page: int) -> str:
+        """How a result names its page: by the number printed on it where the tome
+        records one (as the reader does), otherwise by its position in the file."""
+        return f"p. {self.library.printed_page(book_id, page)}"
 
     def _list_pages(self, tome_item, pages, total: int, showing_all: bool) -> None:
         """Put page rows under a tome's row, replacing any already there."""
@@ -560,7 +587,80 @@ class CardCatalogue(QWidget):
             "Search Only This Tome",
             lambda: self.set_scope(search_scope.scope_of(books=[book_id])))
         only.setEnabled(self._scope != search_scope.scope_of(books=[book_id]))
+        page = item.data(0, ROLE)[1]  # a tome's own row stands for its best page
+        pins = menu.addMenu("Pin to Study Table")
+        tables = self.library.tables()
+        for table in tables:
+            pins.addAction(menu_text(table.name),
+                           lambda t=table.id: self.pin(book_id, page, t))
+        if tables:
+            pins.addSeparator()
+        pins.addAction("New Study Table…", lambda: self._pin_to_new_table(book_id, page))
         return menu
+
+    # -- pinning a result to a Study Table ----------------------------------------------------
+
+    def pin(self, book_id: int, page: int, table_id: int) -> None:
+        """Pin a page to a Study Table without opening its tome. The pin is named after
+        the section the page falls in, or after the words searched for."""
+        if not self.pinner.pin(table_id, book_id, page, self._query):
+            self.notice.emit("That page could not be pinned.")
+
+    def _pin_to_new_table(self, book_id: int, page: int) -> None:
+        name = self.ask_table_name()
+        if name is None:
+            return
+        try:
+            table = self.library.add_table(name)
+        except LibraryError as problem:
+            dialogs.complain(self, str(problem))
+            return
+        self.pin(book_id, page, table.id)
+
+    def ask_table_name(self) -> str | None:
+        return dialogs.ask_name(self, "New Study Table", "Name for the new study table:")
+
+    def _pinned(self, table_id: int, book_id: int, page: int) -> None:
+        table, book = self.library.table(table_id), self.library.book(book_id)
+        if table is not None and book is not None:
+            self.notice.emit(f"Pinned page {self.library.printed_page(book_id, page)} of "
+                             f"“{book.title}” to “{table.name}”.")
+
+    # -- tomes that cannot be searched --------------------------------------------------------
+
+    def _show_note(self, within) -> None:
+        """Point out the tomes within the search's reach that hold no text at all, so
+        nobody wonders why a scanned tome never turns up."""
+        blind = sorted((book for book in within if book.unsearchable),
+                       key=lambda book: book.title.casefold())
+        self._blind = [book.id for book in blind]
+        if not blind:
+            self.note.hide()
+            return
+        names = [f"“{html.escape(book.title)}”" for book in blind]
+        why = "pages are pictures, with no text in them"
+        if len(names) == 1:
+            text = f"{names[0]} cannot be searched: its {why}."
+        elif len(names) <= 3:
+            text = f"{', '.join(names[:-1])} and {names[-1]} cannot be searched: their {why}."
+        else:
+            text = (f"{len(names)} tomes cannot be searched: their {why}. "
+                    f'<a href="#which" style="color:{palette.FROST_300}">Which ones?</a>')
+        self.note.setText(text)
+        self.note.show()
+
+    def cannot_be_searched_menu(self) -> QMenu:
+        """The tomes the note counts, each opening its tome."""
+        menu = QMenu(self)
+        for book_id in self._blind:
+            book = self.library.book(book_id)
+            if book is not None:
+                menu.addAction(menu_text(book.title),
+                               lambda b=book_id: self.openRequested.emit(b, 0, ""))
+        return menu
+
+    def _which_cannot_be_searched(self) -> None:
+        self.cannot_be_searched_menu().exec(QCursor.pos())
 
     def _context(self, position) -> None:
         menu = self.menu_for(self.results.itemAt(position))

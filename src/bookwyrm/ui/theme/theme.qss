@@ -267,6 +267,9 @@ QPushButton#scopeButton[narrowed="true"] {
     border-color: @amber_400;
     color: @amber_300;
 }
+QLabel#catalogueNote {
+    color: @amber_300;
+}
 QFrame#scopePicker {
     background: @stone_800;
     border: 1px solid @stone_500;

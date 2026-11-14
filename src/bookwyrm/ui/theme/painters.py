@@ -194,6 +194,32 @@ def draw_blank_cover(painter: QPainter, rect: QRect, title: str) -> None:
     painter.restore()
 
 
+def draw_no_text_mark(painter: QPainter, rect: QRect) -> None:
+    """A small crossed-out magnifying glass in the foot of a cover: this tome's pages are
+    pictures, so there is no text in it to search."""
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    size = max(16, min(22, rect.width() // 5))
+    badge = QRectF(rect.right() - size - 4, rect.bottom() - size - 4, size, size)
+    painter.setPen(QPen(QColor(0, 0, 0, 170), 1))
+    painter.setBrush(QColor(15, 19, 27, 215))
+    painter.drawEllipse(badge)
+    unit = size / 20.0
+    centre = badge.center()
+    amber = QColor(palette.AMBER_300)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(QPen(amber, 1.6 * unit, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    lens = QPointF(centre.x() - 1.5 * unit, centre.y() - 1.5 * unit)
+    painter.drawEllipse(lens, 3.6 * unit, 3.6 * unit)
+    painter.drawLine(QPointF(lens.x() + 2.7 * unit, lens.y() + 2.7 * unit),
+                     QPointF(centre.x() + 5 * unit, centre.y() + 5 * unit))
+    painter.setPen(QPen(QColor(palette.DANGER), 1.6 * unit, Qt.PenStyle.SolidLine,
+                        Qt.PenCapStyle.RoundCap))
+    painter.drawLine(QPointF(centre.x() + 5.5 * unit, centre.y() - 5.5 * unit),
+                     QPointF(centre.x() - 5.5 * unit, centre.y() + 5.5 * unit))
+    painter.restore()
+
+
 def draw_cover(painter: QPainter, rect: QRect, cover: QPixmap | None, title: str,
                selected: bool = False, dimmed: bool = False) -> None:
     """A tome standing face-out on the shelf."""

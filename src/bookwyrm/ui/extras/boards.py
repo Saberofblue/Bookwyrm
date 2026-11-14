@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QSize, Qt, Signal
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -17,11 +17,14 @@ from PySide6.QtWidgets import (
 )
 
 from bookwyrm.db.repo import Library
+from bookwyrm.pdf.session_client import DocumentSession
 from bookwyrm.ui.library import dialogs
 from bookwyrm.ui.theme import palette
 
 ROLE = Qt.ItemDataRole.UserRole
 CARD_W, CARD_H = 210, 250
+PIN_PICTURE_W = 420  # pixels across, as drawn for a pin's card
+PIN_PATIENCE = 30_000  # ms to wait for a page's picture before pinning without one
 
 
 def image_bytes(image: QImage, fmt: str = "PNG", quality: int = -1) -> bytes:
@@ -37,6 +40,90 @@ def thumbnail_bytes(image: QImage, edge: int = 420) -> bytes:
     scaled = image.scaled(edge, edge, Qt.AspectRatioMode.KeepAspectRatio,
                           Qt.TransformationMode.SmoothTransformation)
     return image_bytes(scaled, "JPG", 82)
+
+
+def section_title(toc, page: int) -> str:
+    """The contents entry that covers a 0-based `page`: a ready-made name for a pin or
+    ribbon there. `toc` is a tome's contents as [level, title, 1-based page, ...] rows."""
+    title = ""
+    for _level, text, number, *_rest in toc or []:
+        if number - 1 <= page:
+            title = str(text).strip()
+        else:
+            break
+    return title
+
+
+class PagePinner(QObject):
+    """Pins pages of tomes that need not be open in the reader.
+
+    A pin carries a small picture of its page. The reader draws that from the tome
+    it has open; here a helper process of its own draws the page from the library's
+    file and is closed again straight after. Because it reads the saved file, pages
+    are numbered as in the saved tome: the numbering the Card Catalogue lists.
+    """
+
+    pinned = Signal(int, int, int)  # table id, book id, 0-based page
+
+    def __init__(self, library: Library, parent=None):
+        super().__init__(parent)
+        self.library = library
+        self._jobs: list[dict] = []
+
+    def pin(self, table_id: int, book_id: int, page: int, fallback_label: str = "") -> bool:
+        """Pin a page to a Study Table once its picture is drawn. The pin is named after
+        the section of the tome the page falls in, or `fallback_label` if it has none.
+        Returns False if the tome or the table is not there to pin."""
+        book = self.library.book(book_id)
+        if book is None or not book.ready or self.library.table(table_id) is None:
+            return False
+        session = DocumentSession(str(self.library.book_file(book)), self)
+        job = {"session": session, "table": table_id, "book": book_id, "page": page,
+               "label": fallback_label, "done": False}
+        self._jobs.append(job)
+        session.pixels.connect(lambda _request, image: self._finish(job, image))
+        session.failed.connect(lambda _request, _message: self._finish(job, None))
+        session.crashed.connect(lambda _message: self._finish(job, None))
+        session.password_required.connect(lambda: self._finish(job, None))
+        session.preview(page, PIN_PICTURE_W, 0)
+        QTimer.singleShot(PIN_PATIENCE, lambda: self._finish(job, None))
+        return True
+
+    def busy(self) -> bool:
+        return bool(self._jobs)
+
+    def _finish(self, job: dict, image) -> None:
+        """Add the pin, with the page's picture if one came (a locked or damaged tome
+        gives none; the pin is still worth having)."""
+        if job["done"]:
+            return
+        job["done"] = True
+        session = job["session"]
+        label = section_title((session.info or {}).get("toc"), job["page"]) or job["label"]
+        picture = thumbnail_bytes(image) if image is not None and not image.isNull() else None
+        library = self.library
+        if library.table(job["table"]) is not None and library.book(job["book"]) is not None:
+            library.add_pin(job["table"], job["book"], job["page"], None, label, picture)
+            self.pinned.emit(job["table"], job["book"], job["page"])
+        QTimer.singleShot(0, lambda: self._release(job))  # not from inside its own signal
+
+    def _release(self, job: dict) -> None:
+        if job in self._jobs:
+            self._jobs.remove(job)
+            job["session"].close()
+            job["session"].deleteLater()
+
+    def forget(self, book_id: int) -> None:
+        """Drop any pinning under way for a tome: its file is about to be removed."""
+        for job in [job for job in self._jobs if job["book"] == book_id]:
+            job["done"] = True
+            self._release(job)
+
+    def close(self) -> None:
+        """Stop every helper: the library is being closed, moved or swapped."""
+        for job in list(self._jobs):
+            job["done"] = True
+            self._release(job)
 
 
 def _card(picture: QPixmap) -> QIcon:
@@ -107,7 +194,9 @@ class _CardPage(QWidget):
         book = self.library.book(book_id) if book_id is not None else None
         if book is None:
             return "Source no longer in the library"
-        return f"{book.title} · p. {page + 1}" if page is not None else book.title
+        if page is None:
+            return book.title
+        return f"{book.title} · p. {self.library.printed_page(book_id, page)}"
 
     def _open(self, item) -> None:  # pragma: no cover - overridden
         raise NotImplementedError

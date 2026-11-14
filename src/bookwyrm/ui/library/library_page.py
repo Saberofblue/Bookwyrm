@@ -184,6 +184,8 @@ class LibraryPage(QWidget):
         self.unsaved = lambda book_id: False  # the window says which tomes have unsaved edits
         self.catalogue = CardCatalogue(library)
         self.catalogue.openRequested.connect(self.openBookAt)
+        self.catalogue.notice.connect(self.message)
+        self.aboutToRemove.connect(self.catalogue.pinner.forget)
         self.stack = QStackedWidget()
         self.commonplace = CommonplaceBook(library)
         self.commonplace.openRegion.connect(self.openRegion)
@@ -215,6 +217,9 @@ class LibraryPage(QWidget):
         # wiring
         self._refresh_timer = QTimer(self, singleShot=True, interval=0)
         self._refresh_timer.timeout.connect(self.refresh)
+        # Printed page numbers arrive tome by tome when a library is first examined for them.
+        self._numbers_timer = QTimer(self, singleShot=True, interval=250)
+        self._numbers_timer.timeout.connect(self._page_numbers_changed)
         library.subscribe(self._on_library_change)
         self.tree.keySelected.connect(self._on_key)
         self.tree.contextRequested.connect(self._tree_menu)
@@ -267,10 +272,15 @@ class LibraryPage(QWidget):
         """Stop following the library: it is about to be closed, moved or swapped."""
         self._detached = True
         self._refresh_timer.stop()
+        self._numbers_timer.stop()
+        self.catalogue.pinner.close()
         self.library.unsubscribe(self._on_library_change)
 
     def _on_library_change(self, what: str) -> None:
         if self._detached:
+            return
+        if what == "page_labels":  # changes how pages are named, not what is on the shelves
+            self._numbers_timer.start()
             return
         if what == "excerpts":
             self.commonplace.reload()
@@ -278,6 +288,11 @@ class LibraryPage(QWidget):
             self.table_page.reload()
         self.catalogue.library_changed(what)
         self._refresh_timer.start(0)
+
+    def _page_numbers_changed(self) -> None:
+        self.catalogue.library_changed("page_labels")
+        self.table_page.reload()
+        self.commonplace.reload()
 
     def _on_key(self, key) -> None:
         if key != self._key:

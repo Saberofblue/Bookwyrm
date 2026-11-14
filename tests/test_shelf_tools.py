@@ -313,7 +313,9 @@ def test_an_older_catalogue_is_upgraded_in_place(tmp_path):
     root = tmp_path / "old"
     (root / "books").mkdir(parents=True)
     schema = resources.files("bookwyrm.db").joinpath("schema.sql").read_text("utf-8")
-    version_one = "\n".join(line for line in schema.splitlines() if "collapsed" not in line)
+    later = ("collapsed", "text_pages", "page_labels")  # what versions 2 and 3 added
+    version_one = "\n".join(line for line in schema.splitlines()
+                            if not any(word in line for word in later))
     con = sqlite3.connect(root / "bookwyrm.db")
     con.executescript(version_one)
     con.execute("INSERT INTO places (kind, name) VALUES ('bookcase', 'From before')")
