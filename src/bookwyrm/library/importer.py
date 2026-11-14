@@ -43,6 +43,7 @@ class Importer(QObject):
         self._jobs: dict[int, dict] = {}
         self._files_left = 0
         self._summary = self._new_summary()
+        self._closed = False
 
     @staticmethod
     def _new_summary() -> dict:
@@ -88,6 +89,10 @@ class Importer(QObject):
         return bool(self._jobs)
 
     def close(self) -> None:
+        """Stop the worker. Anything it had already sent is ignored from here on, because
+        the catalogue may be closed straight after."""
+        self._closed = True
+        self._jobs.clear()
         if self._link is not None:
             self._link.close()
             self._link = None
@@ -109,6 +114,8 @@ class Importer(QObject):
 
     def _on_lost(self) -> None:
         """The worker died: fail what it was doing and let the next request restart it."""
+        if self._closed:
+            return
         self._link = None
         for state in self._jobs.values():
             if state["kind"] in ("inspect", "ingest"):
@@ -119,6 +126,8 @@ class Importer(QObject):
         self._announce()
 
     def _on_message(self, msg) -> None:
+        if self._closed:
+            return
         op, job = msg[0], msg[1]
         state = self._jobs.get(job)
         if state is None:

@@ -580,6 +580,7 @@ class MainWindow(QMainWindow):
         if ask and not self._may_close(pane):
             return
         self._save_pane(pane)
+        pane.blockSignals(True)  # a closing tome must not ask to be remembered again
         self._dirty.discard(pane)
         pane.detach_library()
         group.removeTab(group.indexOf(pane))
@@ -605,6 +606,8 @@ class MainWindow(QMainWindow):
     # -- remembering where you were ------------------------------------------------------
 
     def _mark_dirty(self, pane: ReaderPane) -> None:
+        if self._released or self._group_of(pane) is None:
+            return  # closed, or closing: there is nothing left to remember
         self._dirty.add(pane)
         self._save_timer.start()
 
@@ -616,8 +619,10 @@ class MainWindow(QMainWindow):
                                         state["zoom"], state["mode"])
 
     def _save_reading_states(self) -> None:
+        open_panes = set(self._panes())
         for pane in list(self._dirty):
-            self._save_pane(pane)
+            if pane in open_panes:
+                self._save_pane(pane)
         self._dirty.clear()
 
     def release_library(self) -> bool:
