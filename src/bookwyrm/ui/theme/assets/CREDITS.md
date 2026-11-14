@@ -34,6 +34,11 @@ the full license texts ship alongside the font files.
 - **Cinzel** by Natanael Gama (The Cinzel Project Authors)
 - **EB Garamond** by Georg Duffner and Octavio Pardo (The EB Garamond Project Authors)
 
+## Bookwyrm itself
+
+Free software under the GNU Affero General Public License, version 3. Its source is at
+https://github.com/Saberofblue/Bookwyrm.
+
 ## Software
 
 - **Qt for Python (PySide6)**, LGPL v3

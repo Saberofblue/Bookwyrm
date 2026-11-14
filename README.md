@@ -129,6 +129,19 @@ cannot be replaced or deleted, so saving closes the tome first, waits out brief 
 and never loses changes if the swap fails (`pdf/editing.py`); and file names avoid the
 characters and device names Windows refuses.
 
+## License
+
+Bookwyrm is free software: you may use, study, change and share it under the terms of
+the GNU Affero General Public License, version 3 (see `LICENSE`). If you share a changed
+version, or run one as a network service, you must offer its source under the same terms.
+It comes with no warranty.
+
+Copyright (C) 2026 Saberofblue.
+
+Bookwyrm includes PyMuPDF (AGPL-3.0) and Qt for Python (LGPL-3.0). Bundled fonts, icons
+and textures keep their own licenses, listed in
+`src/bookwyrm/ui/theme/assets/CREDITS.md`.
+
 ## Develop
 
 ```sh

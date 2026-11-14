@@ -14,7 +14,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FILES = ("READ ME FIRST.txt", "Install Bookwyrm.bat", "Start Bookwyrm.bat", "README.md",
+FILES = ("READ ME FIRST.txt", "Install Bookwyrm.bat", "Start Bookwyrm.bat", "README.md", "LICENSE",
          "pyproject.toml", "installer/setup_bookwyrm.py", "packaging/Bookwyrm.ico")
 SKIP_NAMES = {"__pycache__", ".DS_Store"}
 SKIP_SUFFIXES = {".pyc", ".pyo"}

@@ -44,7 +44,7 @@ def test_self_test_reports_a_failure_instead_of_crashing(monkeypatch, capsys):
 def test_windows_package_holds_what_is_needed_and_nothing_private(tmp_path, monkeypatch):
     packager = load(ROOT / "packaging" / "make_windows_package.py")
     names = {str(p.relative_to(ROOT)).replace("\\", "/") for p in packager.package_files()}
-    for needed in ("Install Bookwyrm.bat", "Start Bookwyrm.bat", "READ ME FIRST.txt",
+    for needed in ("Install Bookwyrm.bat", "Start Bookwyrm.bat", "READ ME FIRST.txt", "LICENSE",
                    "installer/setup_bookwyrm.py", "packaging/Bookwyrm.ico",
                    "src/bookwyrm/__main__.py", "src/bookwyrm/db/schema.sql",
                    "src/bookwyrm/ui/theme/theme.qss", "src/bookwyrm/ui/theme/assets/CREDITS.md",
