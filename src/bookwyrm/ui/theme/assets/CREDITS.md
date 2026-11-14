@@ -16,7 +16,7 @@ interface.
   book-pile, bookshelf, desk, expand, files, hand-truck, notebook, pencil, save,
   spiked-dragon-head, stack, table, trash-can
 
-The two small chevrons are original to Bookwyrm.
+The two small chevrons and the three tick boxes are original to Bookwyrm.
 
 ## Textures
 

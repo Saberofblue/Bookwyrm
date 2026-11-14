@@ -258,6 +258,38 @@ QWidget#libraryHeader {
     border-bottom: 1px solid @stone_600;
 }
 
+/* ---- Card Catalogue: narrowing the search ---- */
+QPushButton#scopeButton {
+    text-align: left;
+    padding: 6px 14px;
+}
+QPushButton#scopeButton[narrowed="true"] {
+    border-color: @amber_400;
+    color: @amber_300;
+}
+QFrame#scopePicker {
+    background: @stone_800;
+    border: 1px solid @stone_500;
+}
+QTreeView#scopeTree {
+    background: @stone_900;
+    border: 1px solid @stone_600;
+    border-radius: 6px;
+}
+QTreeView#scopeTree::indicator {
+    width: 16px;
+    height: 16px;
+}
+QTreeView#scopeTree::indicator:unchecked {
+    image: url("@assets/icons/tick-off.svg");
+}
+QTreeView#scopeTree::indicator:checked {
+    image: url("@assets/icons/tick-on.svg");
+}
+QTreeView#scopeTree::indicator:indeterminate {
+    image: url("@assets/icons/tick-part.svg");
+}
+
 /* ---- status bar: the Librarian speaks here ---- */
 QStatusBar {
     background: @stone_900;

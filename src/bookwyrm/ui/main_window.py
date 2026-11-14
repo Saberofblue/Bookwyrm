@@ -468,6 +468,8 @@ class MainWindow(QMainWindow):
         pane.aboutToSave.connect(self.importer.forget)  # stop reading a file about to change
         pane.tomeSaved.connect(self.importer.reindex)
         pane.coverChanged.connect(self.library_page.view.invalidate_cover)
+        pane.coverChanged.connect(
+            lambda _book: self.library_page.catalogue.library_changed("books"))
         pane.scriptorium.extracted.connect(self._import_extract)
         pane.scriptorium.retitled.connect(lambda new, s=session: self._retitle(s, new))
         index = group.addTab(pane, icons.icon("open-book"), _tab_title(title))

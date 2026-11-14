@@ -6,13 +6,13 @@ Qt-free so it can be tested and reused anywhere. Interested parties call
 
 from __future__ import annotations
 
-import re
 import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from bookwyrm.db import database
+from bookwyrm.db import database, search
+from bookwyrm.db.search import PageHit, TomeHits, fts_query
 
 CHILD_KIND = {"bookcase": "shelf", "shelf": "set"}
 PARENT_KIND = {"shelf": "bookcase", "set": "shelf"}
@@ -126,25 +126,6 @@ def _book(row) -> Book:
     )
 
 
-def fts_query(text: str) -> str:
-    """Turn what a person typed into a safe FTS5 query.
-
-    Quoted phrases stay phrases; every other word must appear, and the last bare
-    word matches as a prefix so results appear while typing.
-    """
-    terms = []
-    last_is_bare_word = False
-    for phrase, word in re.findall(r'"([^"]+)"|(\S+)', text):
-        token = (phrase or word).replace('"', " ").strip()
-        last_is_bare_word = False
-        if token and re.search(r"\w", token):
-            terms.append(f'"{token}"')
-            last_is_bare_word = bool(word)
-    if terms and last_is_bare_word and not text.endswith(" "):
-        terms[-1] += "*"
-    return " ".join(terms)
-
-
 class Library:
     def __init__(self, root: Path | str):
         self.root = Path(root)
@@ -152,6 +133,7 @@ class Library:
             (self.root / sub).mkdir(parents=True, exist_ok=True)
         self.db = database.connect(self.root / "bookwyrm.db")
         self._listeners: list = []
+        self._rows: search.RowMap | None = None  # see _row_map()
 
     def close(self) -> None:
         """Close the catalogue, folding its write-ahead log into the one database file
@@ -371,6 +353,7 @@ class Library:
         with self.db:
             self.db.execute("DELETE FROM pages_fts WHERE book_id = ?", (book_id,))
             self.db.execute("DELETE FROM books WHERE id = ?", (book_id,))
+        self._rows = None  # freed rows may be reused by other text
         shutil.rmtree(self.book_dir(book_id), ignore_errors=True)
         self.cover_file(book_id).unlink(missing_ok=True)
         self._changed("books")
@@ -701,6 +684,7 @@ class Library:
         with self.db:
             self.db.execute("DELETE FROM pages_fts WHERE book_id = ?", (book_id,))
             self.db.execute("UPDATE books SET indexed = 0 WHERE id = ?", (book_id,))
+        self._rows = None  # freed rows may be reused by other text
 
     def set_indexed(self, book_id: int, indexed: bool = True) -> None:
         with self.db:
@@ -712,6 +696,7 @@ class Library:
         return [_book(r) for r in rows]
 
     def search(self, text: str, limit: int = 300) -> list[Hit]:
+        """The best pages in the whole library, best first, each with its excerpt."""
         query = fts_query(text)
         if not query:
             return []
@@ -723,3 +708,46 @@ class Library:
             (query, limit),
         )
         return [Hit(int(r["book_id"]), int(r["page"]), r["snip"]) for r in rows]
+
+    # The Card Catalogue's search: every tome that mentions the words, then its pages.
+    # See db/search.py for why it is shaped this way.
+
+    def _row_map(self) -> search.RowMap:
+        if self._rows is None:
+            self._rows = search.RowMap()
+        self._rows.extend(self.db)  # picks up pages indexed since the last search
+        return self._rows
+
+    def search_tomes(self, text: str, books=None, per_tome: int = 6) -> list[TomeHits]:
+        """Every tome with a page matching `text`, the best tome first, each with its
+        number of matching pages and its best `per_tome` pages. `books`, a
+        collection of tome ids, limits the search to those tomes."""
+        scope = None if books is None else set(books)
+        found = search.matches(self.db, self._row_map(), text, scope)
+        return search.by_tome(found, per_tome)
+
+    def search_tome(self, text: str, book_id: int) -> list[PageHit]:
+        """Every page of one tome matching `text`, in page order."""
+        found = search.matches(self.db, self._row_map(), text, {book_id})
+        return search.in_page_order(found.get(book_id, []))
+
+    def snippets(self, text: str, rowids) -> dict[int, str]:
+        """Excerpts for search hits, keyed by PageHit.rowid; matches are wrapped
+        in \\x02 ... \\x03."""
+        return search.snippets(self.db, text, rowids)
+
+    # -- which tomes a selection of places holds -------------------------------------------
+
+    def books_within(self, place_ids) -> set[int]:
+        """Ids of the tomes standing in any of the given places or in anything inside them."""
+        wanted: set[int] = set()
+        for place_id in place_ids:
+            wanted.add(place_id)
+            wanted.update(self.descendants(place_id))
+        if not wanted:
+            return set()
+        marks = ",".join("?" * len(wanted))
+        rows = self.db.execute(
+            f"SELECT DISTINCT book_id FROM book_places WHERE place_id IN ({marks})",
+            tuple(wanted))
+        return {row[0] for row in rows}

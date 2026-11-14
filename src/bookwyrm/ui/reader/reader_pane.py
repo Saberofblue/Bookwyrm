@@ -22,7 +22,7 @@ from bookwyrm.db.repo import LibraryError
 from bookwyrm.ui import prefs
 from bookwyrm.ui.editor.scriptorium import Scriptorium
 from bookwyrm.ui.extras.boards import image_bytes, thumbnail_bytes
-from bookwyrm.ui.keys import hint
+from bookwyrm.ui.keys import hint, menu_text
 from bookwyrm.ui.library import dialogs
 from bookwyrm.ui.reader.find_bar import FindBar
 from bookwyrm.ui.reader.page_view import READING_MODES, PageView
@@ -377,7 +377,7 @@ class ReaderPane(QWidget):
         """Fill `menu` with the Study Tables; `handler(table_id)` runs on a choice."""
         tables = self.library.tables()
         for table in tables:
-            menu.addAction(table.name, lambda t=table.id: handler(t))
+            menu.addAction(menu_text(table.name), lambda t=table.id: handler(t))
         if tables:
             menu.addSeparator()
         menu.addAction("New Study Table…", lambda: self._new_table(handler))

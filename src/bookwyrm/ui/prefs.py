@@ -17,6 +17,7 @@ DEFAULTS = {
     "shelves/cover_height": 172,
     "shelves/view": "covers",  # covers | list
     "shelves/sort": "shelf",  # shelf | title | author | added | read
+    "catalogue/order": "best",  # search results by tome: best | pages | title
 }
 
 

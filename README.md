@@ -32,7 +32,7 @@ and **Alt** for ⌥; the tooltips inside the app always show the right keys for 
 | Returns Cart | Added tomes not yet shelved |
 | The Stacks | Every tome |
 | Reading Desk | Recently read tomes |
-| Card Catalogue | Search the text of every tome at once (⇧⌘F) |
+| Card Catalogue | Search the text of your tomes at once (⇧⌘F) |
 | Commonplace Book | Excerpts you have clipped from pages |
 | Study Tables | Pages pinned together for a session |
 
@@ -48,6 +48,17 @@ On the shelves:
 - **Right-click a tome** to export a copy (with your edits) or the original, or to show
   its file in Finder or File Explorer.
 - Bookwyrm reopens the tomes you had open last time (a Settings switch turns this off).
+
+In the Card Catalogue:
+
+- **Every tome that mentions your words is listed**, with how many of its pages do and
+  the best few of them. **Show all** under a tome lists the rest; nothing is cut off.
+- **Search in** narrows the search: tick whole bookcases, shelves or sets, or single
+  tomes. Or right-click a bookcase, shelf, set or tome on the shelves and choose
+  **Search Inside…**, or right-click a result and choose **Search Only This Tome**.
+- Tomes can be listed best match first, most pages first, or by title.
+- Words typed without quotes must all be on the page; pages where they stand together
+  come first. Put a phrase in "quotes" to require it exactly.
 
 ## Reading
 

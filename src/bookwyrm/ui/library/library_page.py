@@ -27,7 +27,8 @@ from bookwyrm.library.importer import Importer, safe_filename
 from bookwyrm.ui import prefs, system
 from bookwyrm.ui.extras.boards import CommonplaceBook, StudyTablePage
 from bookwyrm.ui.extras.card_catalogue import CardCatalogue
-from bookwyrm.ui.keys import hint
+from bookwyrm.ui.extras.search_scope import Scope, scope_of
+from bookwyrm.ui.keys import hint, menu_text
 from bookwyrm.ui.library import dialogs
 from bookwyrm.ui.library.arrange import SORTS, arrange, count
 from bookwyrm.ui.library.bookcase_tree import BookcaseTree
@@ -250,10 +251,15 @@ class LibraryPage(QWidget):
     def show_key(self, key) -> None:
         self.tree.select_key(key)
 
-    def show_catalogue(self, query: str | None = None) -> None:
+    def show_catalogue(self, query: str | None = None, scope: Scope | None = None) -> None:
+        """Show the Card Catalogue, optionally with words to search for and narrowed to
+        some places or tomes (`scope`; an empty Scope searches every tome)."""
         self.tree.select_key(("virtual", "catalogue"))
         if query is not None:
             self.catalogue.field.setText(query)
+        if scope is not None:
+            self.catalogue.set_scope(scope)
+        elif query is not None:
             self.catalogue.search()
         self.catalogue.focus_field()
 
@@ -270,6 +276,7 @@ class LibraryPage(QWidget):
             self.commonplace.reload()
         elif what == "tables":
             self.table_page.reload()
+        self.catalogue.library_changed(what)
         self._refresh_timer.start(0)
 
     def _on_key(self, key) -> None:
@@ -361,9 +368,8 @@ class LibraryPage(QWidget):
         if self._key == ("virtual", "catalogue"):
             self.stack.setCurrentWidget(self.catalogue)
             self.heading.setText("Card Catalogue")
-            self.subheading.setText("Search the text of every tome in the library")
-            if not self.catalogue.field.text().strip():
-                self.catalogue.search()  # refreshes the "N tomes" line
+            self.subheading.setText("Search the text of your tomes")
+            self.catalogue.refresh()  # names and counts may have changed since it was last shown
             return
         if self._key == ("virtual", "commonplace"):
             self.stack.setCurrentWidget(self.commonplace)
@@ -564,6 +570,8 @@ class LibraryPage(QWidget):
         if place is None:
             return
         menu.addAction("Add Tomes Here…", lambda: self.add_tomes(place.id))
+        menu.addAction("Search Inside…",
+                       lambda: self.show_catalogue(scope=scope_of(places=[place.id])))
         child = CHILD_KIND.get(place.kind)
         if child:
             menu.addAction(f"New {KIND_LABEL[child]}…", lambda: self.create_place(child, place.id))
@@ -608,13 +616,13 @@ class LibraryPage(QWidget):
             for place in by_parent.get(parent_id, []):
                 children = by_parent.get(place.id)
                 if children:
-                    sub = target.addMenu(place.name)
-                    sub.addAction(f"On “{place.name}” itself",
+                    sub = target.addMenu(menu_text(place.name))
+                    sub.addAction(menu_text(f"On “{place.name}” itself"),
                                   lambda p=place.id: handler(p))
                     sub.addSeparator()
                     fill(sub, place.id)
                 else:
-                    target.addAction(place.name, lambda p=place.id: handler(p))
+                    target.addAction(menu_text(place.name), lambda p=place.id: handler(p))
 
         fill(top, None)
 
@@ -629,6 +637,11 @@ class LibraryPage(QWidget):
                 menu.addAction(label, lambda: [self.openBook.emit(b.id) for b in ready])
             if len(books) == 1:
                 menu.addAction("Details…", lambda: self._details(books[0]))
+            if ready:
+                label = "Search This Tome…" if len(ready) == 1 \
+                    else f"Search These {len(ready)} Tomes…"
+                menu.addAction(label, lambda: self.show_catalogue(
+                    scope=scope_of(books=[b.id for b in ready])))
             menu.addSeparator()
 
             def move_to(target):
@@ -666,7 +679,7 @@ class LibraryPage(QWidget):
         sub = menu.addMenu("Labels")
         for name in self.library.all_labels():
             on_all = all(name in by_book.get(book.id, ()) for book in books)
-            action = sub.addAction(name)
+            action = sub.addAction(menu_text(name))
             action.setCheckable(True)
             action.setChecked(on_all)
             action.triggered.connect(
