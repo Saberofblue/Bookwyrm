@@ -185,6 +185,7 @@ class Host:
         if cached is not None:
             self._lists.move_to_end(page)
             return cached
+        self.editor.mend_page(page)  # correct wrongly described pictures before drawing them
         dl = self.doc[page].get_displaylist()
         self._lists[page] = dl
         while len(self._lists) > DISPLAY_LIST_CACHE:

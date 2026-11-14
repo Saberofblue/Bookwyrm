@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 import pymupdf
 
-from bookwyrm.pdf import compat
+from bookwyrm.pdf import compat, repair
 
 OPERATIONS: dict = {}
 
@@ -83,6 +83,8 @@ class Editor:
         self.log: list[dict] = []  # every operation still reachable by undo or redo
         self.position = 0  # how many of them are currently applied
         self.origins: list[int | None] = list(range(self.doc.page_count))
+        self.checked: set[int] = set()  # pictures already examined by mend_page()
+        self.mended = False  # True once every picture in the tome has been examined
 
     # -- state ----------------------------------------------------------------
 
@@ -121,6 +123,7 @@ class Editor:
             raise EditError("Only PDF tomes can be edited.")
         fn, label = OPERATIONS[name]
         if not self.journalling:
+            self.mend_all()  # impossible once history is running
             self._prewarm()
             self.doc.journal_enable()
             self.journalling = True
@@ -140,6 +143,22 @@ class Editor:
         self.log.append(entry)
         self.position += 1
         return entry
+
+    def mend_page(self, page: int) -> None:
+        """Correct wrongly described pictures on a page before it is drawn (see pdf/repair.py).
+
+        The engine refuses changes made outside an undoable step once history is
+        running, and a repair must never become something Undo takes back, so
+        from then on this does nothing; mend_all() has already been through
+        every page by that point.
+        """
+        if not self.journalling and not self.mended:
+            repair.mend_page(self.doc, page, self.checked)
+
+    def mend_all(self) -> None:
+        if not self.mended:
+            repair.mend_document(self.doc, self.checked)
+            self.mended = True
 
     def _prewarm(self) -> None:
         """Create, before history starts, the font the engine uses for text boxes.
@@ -255,6 +274,7 @@ class Editor:
             mapping = {origin: index for index, origin in enumerate(self.origins)
                        if origin is not None}
         origins = list(self.origins)
+        mended = self.mended  # what was just written is as mended as what was in memory
         self.doc.close()  # Windows will not replace a file that is still open
         previous, self.stranded = self.stranded, None
         try:
@@ -262,6 +282,7 @@ class Editor:
         except OSError as problem:
             self._open(temporary)  # carry on from what was just written
             self._reset()
+            self.mended = mended
             self.origins = origins  # still measured against the file in the library
             self.stranded = temporary
             self._discard(previous)
@@ -272,6 +293,7 @@ class Editor:
         self._discard(previous)
         self._open(self.path)
         self._reset()
+        self.mended = mended
         return {
             "file_size": os.path.getsize(self.path),
             "sha256": sha256_of(self.path),
@@ -593,6 +615,9 @@ def op_insert_pdf(editor: Editor, path: str, at: int, first: int = 0,
         first = max(0, int(first))
         if first > last:
             raise EditError("That PDF has no such pages.")
+        seen: set[int] = set()
+        for number in range(first, last + 1):  # they cannot be mended once they are in
+            repair.mend_page(source, number, seen)
         with compat.python_paths():
             doc.insert_pdf(source, from_page=first, to_page=last,
                            start_at=at if at < doc.page_count else -1)
@@ -670,6 +695,7 @@ def extract_pages(doc, pages, destination: str) -> int:
     try:
         for page in pages:
             new.insert_pdf(doc, from_page=page, to_page=page)
+        repair.mend_document(new)
         new.save(destination, garbage=3, deflate=True)
     finally:
         new.close()

@@ -25,6 +25,8 @@ import shutil
 from collections import deque
 from pathlib import Path
 
+from bookwyrm.pdf import repair
+
 BATCH = 20  # pages of text per message
 COVER_WIDTH = 480
 
@@ -84,6 +86,7 @@ def make_cover(pymupdf, pdf_path: str, cover_path: str) -> bool:
     try:
         if doc.needs_pass or doc.page_count == 0:
             return False
+        repair.mend_page(doc, 0)  # in memory only: the file is not written to
         page = doc[0]
         scale = COVER_WIDTH / max(1.0, page.rect.width)
         pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
