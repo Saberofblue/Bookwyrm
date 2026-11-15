@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from bookwyrm import paths
+from bookwyrm import __version__, paths
 from bookwyrm.db.repo import Library
 from bookwyrm.library import relocate
 from bookwyrm.ui import prefs, system
@@ -42,6 +42,7 @@ def _section(text: str) -> QLabel:
 class SettingsDialog(QDialog):
     libraryChangeRequested = Signal(str, str)  # folder, "move" | "switch"
     coverHeightChanged = Signal(int)
+    updateCheckRequested = Signal()  # the Check for Updates button was pressed
     readingChanged = Signal()  # reading light, side panel or spread preference changed
 
     def __init__(self, library: Library, parent=None):
@@ -113,6 +114,19 @@ class SettingsDialog(QDialog):
         shelves = QFormLayout()
         shelves.addRow("Cover size on the shelves", self.cover)
 
+        # ---- updates ----
+        self.version = QLabel(f"This is Bookwyrm {__version__}. It looks for a newer "
+                              "version only when you ask it to.")
+        self.version.setObjectName("subheading")
+        self.version.setWordWrap(True)
+        self.check_updates = QPushButton("Check for Updates…")
+        self.check_updates.setToolTip("Ask GitHub whether a newer Bookwyrm has been released")
+        self.check_updates.setAutoDefault(False)
+        self.check_updates.clicked.connect(self.updateCheckRequested)
+        update_buttons = QHBoxLayout()
+        update_buttons.addWidget(self.check_updates)
+        update_buttons.addStretch(1)
+
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
@@ -133,6 +147,9 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.spread)
         layout.addWidget(_section("SHELVES"))
         layout.addLayout(shelves)
+        layout.addWidget(_section("UPDATES"))
+        layout.addWidget(self.version)
+        layout.addLayout(update_buttons)
         layout.addSpacing(8)
         layout.addWidget(buttons)
 

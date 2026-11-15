@@ -20,6 +20,13 @@ PDF **copies** it there; the file you added is never changed. **Settings** (⌘,
 button under the bookcase list) lets you keep the library somewhere else: Bookwyrm can
 move everything there, or switch to a library that is already there.
 
+**Updating.** Settings has a **Check for Updates** button (also under Help, or in the
+Bookwyrm menu on a Mac). Bookwyrm asks GitHub for its newest release only when you press
+it; nothing about your library is sent. On a Mac, **Update and Restart** then downloads
+the new version, checks it against the release's checksum, makes sure it runs, and puts
+it in place of the old one; if the new version fails to start, the old one is put back.
+On Windows the button opens the download page for now.
+
 A newer Bookwyrm upgrades a library's catalogue the first time it opens it, and older
 versions cannot open it afterwards. A copy of the catalogue as it was is kept in the
 library folder as `bookwyrm-before-upgrade.db`; to go back to an older version, quit
@@ -174,6 +181,13 @@ python3 -m venv .venv
 ```
 
 Layout: `src/bookwyrm/db` (catalogue), `library` (import and indexing), `pdf` (the
-helper process that owns each open tome, and the editing engine), `ui` (interface and
-theme). `spikes/` holds the measurements the design was based on. Artwork credits are
+helper process that owns each open tome, and the editing engine), `updates` (Bookwyrm
+updating itself), `ui` (interface and theme). `spikes/` holds the measurements the design was based on. Artwork credits are
 in `src/bookwyrm/ui/theme/assets/CREDITS.md` and under Help → About.
+
+**Releases and updates.** Bookwyrm updates itself from this project's GitHub releases,
+finding its download by name: `Bookwyrm-mac-arm64.zip` and `Bookwyrm-windows.zip`, as
+`packaging/build.py --zip` names them. A release that lacks the file for a system simply
+offers that system nothing to install. `packaging/rehearse_update.py` rehearses an update
+with real packaged builds and publishes nothing; with `--kit DIR` it prepares what is
+needed to try the Check for Updates window by hand.

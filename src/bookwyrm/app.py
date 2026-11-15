@@ -110,12 +110,32 @@ class Shell:
             self.library.close()
 
 
+def _report_update(window) -> None:
+    """If Bookwyrm has just replaced itself with a newer version (or tried to), say so."""
+    from bookwyrm import __version__
+    from bookwyrm.updates.updater import take_outcome
+
+    outcome = take_outcome()  # also tells a waiting update step that this version came up
+    if outcome is None:
+        return
+    worked, note = outcome
+    if worked:
+        window.notice(f"Bookwyrm has been updated to version {__version__}.")
+    else:
+        from bookwyrm.ui.library import dialogs
+
+        QTimer.singleShot(0, lambda: dialogs.complain(
+            window, f"The update could not be installed: {note}\n\n"
+                    f"You are still using version {__version__}."))
+
+
 def run(argv=None) -> int:
     args = _parse(sys.argv[1:] if argv is None else argv)
     app = create_app()
     width, height = (int(n) for n in args.size.lower().split("x"))
     shell = Shell(app, (width, height))
     window = shell.open(paths.library_root(QSettings().value("library_root")))
+    _report_update(window)
     if args.pdf:
         pane = window.open_path(args.pdf)
 

@@ -67,6 +67,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.library = library
         self._released = False  # True once the library has been let go of (closing or moving)
+        self._updater = None  # made when the user first checks for updates
         self.settings = QSettings()
         self.importer = Importer(library, self)
         self.sessions = SessionPool(self)
@@ -243,6 +244,8 @@ class MainWindow(QMainWindow):
 
         help_menu = self.menuBar().addMenu("&Help")
         self._add(help_menu, "About Bookwyrm and Credits", None, self.show_about)
+        updates = self._add(help_menu, "Check for &Updates…", None, self.check_for_updates)
+        updates.setMenuRole(QAction.MenuRole.ApplicationSpecificRole)  # the app menu, on a Mac
 
     def _add(self, menu, text, shortcut, slot) -> QAction:
         action = QAction(text, self)
@@ -291,7 +294,38 @@ class MainWindow(QMainWindow):
         dialog.coverHeightChanged.connect(self.library_page.set_cover_height)
         dialog.readingChanged.connect(self._apply_reading_preferences)
         dialog.libraryChangeRequested.connect(self.libraryChangeRequested)
+        dialog.updateCheckRequested.connect(self.check_for_updates)
         dialog.exec()
+
+    # -- updating Bookwyrm itself ---------------------------------------------------------
+
+    def check_for_updates(self) -> None:
+        """Ask GitHub whether a newer Bookwyrm exists, and offer to install it. Nothing is
+        asked until the user chooses this."""
+        from bookwyrm.ui.update_dialog import UpdateDialog
+        from bookwyrm.updates.updater import Updater
+
+        if self._updater is None:
+            self._updater = Updater(parent=self)
+        dialog = UpdateDialog(self._updater, self)
+        dialog.restartRequested.connect(lambda: self._restart_for_update(dialog))
+        dialog.exec()
+
+    def _restart_for_update(self, dialog) -> None:
+        """The new version is downloaded and tested: close so that it can be swapped in."""
+        from bookwyrm.updates.release import UpdateError
+
+        try:
+            self._updater.install()  # starts the step that waits for this app to close
+        except UpdateError as problem:
+            dialog.show_failure(str(problem))
+            return
+        if not self.release_library():  # a tome has unsaved changes and the user stayed
+            self._updater.call_off()
+            dialog.waiting_to_restart()
+            return
+        dialog.accept()
+        self.close()
 
     def _apply_reading_preferences(self) -> None:
         for pane in self._panes():

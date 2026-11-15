@@ -69,6 +69,8 @@ class PagePinner(QObject):
         super().__init__(parent)
         self.library = library
         self._jobs: list[dict] = []
+        self._settle = QTimer(self, singleShot=True, interval=0)
+        self._settle.timeout.connect(self._release_finished)
 
     def pin(self, table_id: int, book_id: int, page: int, fallback_label: str = "") -> bool:
         """Pin a page to a Study Table once its picture is drawn. The pin is named after
@@ -78,19 +80,39 @@ class PagePinner(QObject):
         if book is None or not book.ready or self.library.table(table_id) is None:
             return False
         session = DocumentSession(str(self.library.book_file(book)), self)
-        job = {"session": session, "table": table_id, "book": book_id, "page": page,
-               "label": fallback_label, "done": False}
+        patience = QTimer(session, singleShot=True, interval=PIN_PATIENCE)
+        job = {"session": session, "patience": patience, "table": table_id, "book": book_id,
+               "page": page, "label": fallback_label, "done": False}
         self._jobs.append(job)
-        session.pixels.connect(lambda _request, image: self._finish(job, image))
-        session.failed.connect(lambda _request, _message: self._finish(job, None))
-        session.crashed.connect(lambda _message: self._finish(job, None))
-        session.password_required.connect(lambda: self._finish(job, None))
+        # Methods, not closures over `self`: a closure held by a session would be what
+        # keeps this pinner alive, and dropping it as the session is deleted would delete
+        # the session's own parent under it. Each method finds its job by who is calling.
+        session.pixels.connect(self._drawn)
+        session.failed.connect(self._not_drawn)
+        session.crashed.connect(self._not_drawn)
+        session.password_required.connect(self._not_drawn)
+        patience.timeout.connect(self._not_drawn)
         session.preview(page, PIN_PICTURE_W, 0)
-        QTimer.singleShot(PIN_PATIENCE, lambda: self._finish(job, None))
+        patience.start()
         return True
 
     def busy(self) -> bool:
         return bool(self._jobs)
+
+    def _job_of(self, sender) -> dict | None:
+        return next((job for job in self._jobs
+                     if sender is job["session"] or sender is job["patience"]), None)
+
+    def _drawn(self, _request, image) -> None:
+        job = self._job_of(self.sender())
+        if job is not None:
+            self._finish(job, image)
+
+    def _not_drawn(self, *_details) -> None:
+        """No picture will come (the tome is locked, damaged, or too slow): pin without one."""
+        job = self._job_of(self.sender())
+        if job is not None:
+            self._finish(job, None)
 
     def _finish(self, job: dict, image) -> None:
         """Add the pin, with the page's picture if one came (a locked or damaged tome
@@ -98,6 +120,7 @@ class PagePinner(QObject):
         if job["done"]:
             return
         job["done"] = True
+        job["patience"].stop()
         session = job["session"]
         label = section_title((session.info or {}).get("toc"), job["page"]) or job["label"]
         picture = thumbnail_bytes(image) if image is not None and not image.isNull() else None
@@ -105,11 +128,16 @@ class PagePinner(QObject):
         if library.table(job["table"]) is not None and library.book(job["book"]) is not None:
             library.add_pin(job["table"], job["book"], job["page"], None, label, picture)
             self.pinned.emit(job["table"], job["book"], job["page"])
-        QTimer.singleShot(0, lambda: self._release(job))  # not from inside its own signal
+        self._settle.start()  # let go of the helper once this signal has been dealt with
+
+    def _release_finished(self) -> None:
+        for job in [job for job in self._jobs if job["done"]]:
+            self._release(job)
 
     def _release(self, job: dict) -> None:
         if job in self._jobs:
             self._jobs.remove(job)
+            job["patience"].stop()
             job["session"].close()
             job["session"].deleteLater()
 

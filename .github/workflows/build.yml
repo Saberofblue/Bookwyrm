@@ -1,6 +1,9 @@
-# Tests Bookwyrm on Windows, rehearses the one-click install, and builds Bookwyrm.exe.
+# Tests Bookwyrm on Windows and on a Mac and builds the program for each. On Windows it
+# also rehearses the one-click install; on the Mac it rehearses the app updating itself.
 # Runs on every push and on demand (Actions tab -> "Build Bookwyrm" -> Run workflow).
-# The finished programs appear as downloadable artifacts on the run's page.
+# The finished programs appear as downloadable artifacts on the run's page. A release
+# is made from them by hand; its files must keep the names they have here, because
+# Bookwyrm looks for them by name when it updates itself (src/bookwyrm/updates/release.py).
 name: Build Bookwyrm
 
 on:
@@ -12,10 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows only: the Mac app is built on the Mac itself (packaging/build.sh), and
-        # macOS machines use up a private repository's free build minutes ten times as
-        # fast. Add macos-latest to this list to build both here.
-        os: [windows-latest]
+        # macos-latest is an Apple-silicon Mac, so the Mac download is the arm64 one.
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +41,14 @@ jobs:
           type "%RUNNER_TEMP%\exe-selftest.txt"
           findstr /c:"RESULT: all" "%RUNNER_TEMP%\exe-selftest.txt"
           dir /b dist\Bookwyrm
+      - name: Run the built app's self-test, then rehearse it updating itself
+        if: runner.os == 'macOS'
+        run: |
+          dist/Bookwyrm.app/Contents/MacOS/Bookwyrm --version
+          dist/Bookwyrm.app/Contents/MacOS/Bookwyrm --self-test
+          python packaging/rehearse_update.py
       - name: Make the Windows source package
+        if: runner.os == 'Windows'
         run: python packaging/make_windows_package.py
       - name: Install from the package the way a Windows user would
         if: runner.os == 'Windows'
@@ -51,9 +59,17 @@ jobs:
           call "%RUNNER_TEMP%\A Friend's PC\Bookwyrm\Install Bookwyrm.bat" --no-launch < nul
           type "%RUNNER_TEMP%\A Friend's PC\Bookwyrm\setup-log.txt"
           findstr /c:"Bookwyrm is ready." "%RUNNER_TEMP%\A Friend's PC\Bookwyrm\setup-log.txt"
-      - name: Upload
+      - name: Upload the Windows programs
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: Bookwyrm-${{ runner.os }}
           path: dist/Bookwyrm-*.zip
+          if-no-files-found: error
+      - name: Upload the Mac app
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bookwyrm-${{ runner.os }}
+          path: dist/Bookwyrm-mac-*.zip
           if-no-files-found: error
