@@ -123,7 +123,7 @@ def why_not(bundle: Path | None) -> str | None:
     if bundle is None:
         return ("This copy of Bookwyrm is running from its source code, so it cannot "
                 "replace itself. Update it the way you got it.")
-    if "/AppTranslocation/" in str(bundle):
+    if "AppTranslocation" in bundle.parts:
         return ("macOS is running Bookwyrm from a temporary place, where it cannot be "
                 "replaced. Move Bookwyrm into your Applications folder, open it from "
                 "there, and check for updates again.")
