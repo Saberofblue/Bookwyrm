@@ -277,6 +277,8 @@ def take_outcome(staging=None) -> tuple[bool, str] | None:
     staging = Path(staging) if staging else default_staging()
     outcome = notes.take_outcome(staging)
     notes.mark_started(staging)
+    if outcome is None:  # not just updated: tidy anything an earlier update left behind
+        windows.clear_leftovers(windows.installed_path())
     for leftover in (ARCHIVE, UNPACKED):  # a download that was fetched but never installed
         path = staging / leftover
         if path.is_dir():

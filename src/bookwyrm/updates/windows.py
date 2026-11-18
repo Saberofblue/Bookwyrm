@@ -16,6 +16,11 @@ Windows way.
 arguments must keep their meaning from version to version:
 
     --finish-update <process id to wait for> <folder to replace> <notes folder> <relaunch|stay>
+
+The folder is only ever missing for the instant between two renames: the new version is
+first copied in full to "Bookwyrm.incoming" beside the old one, then the old one is
+renamed "Bookwyrm.previous" and the copy takes its name. Opening Bookwyrm at any other
+moment finds a whole program.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from bookwyrm.updates.release import UpdateError
 
 SYSTEM = "win32"  # the kind of download this module installs (see release.asset_name)
 EXE = "Bookwyrm.exe"
+LEFTOVERS = (".incoming", ".previous")  # added to the folder's name while it is swapped
 PATIENCE = 60  # half-seconds to wait for the new version to come up before doubting it
 _FROM_A_ZIP = re.compile(r"(?i)^(temp\d*_.*\.zip|7zo.*|rar\$.*)$")  # where zip tools unpack to
 
@@ -195,7 +201,7 @@ def finish_update(pid: int, folder, staging, relaunch: bool, new_folder=None,
     """
     folder, staging = Path(folder), Path(staging)
     new_folder = Path(new_folder) if new_folder else Path(sys.executable).parent
-    previous = folder.with_name(folder.name + ".previous")
+    incoming, previous = (folder.with_name(folder.name + suffix) for suffix in LEFTOVERS)
     exe = executable_of(folder)
     log = open(staging / "swap.log", "a", encoding="utf-8")
 
@@ -220,20 +226,31 @@ def finish_update(pid: int, folder, staging, relaunch: bool, new_folder=None,
             outcome("failed: Bookwyrm did not close, so it was left as it is.")
             return 1
         (staging / notes.STARTED).unlink(missing_ok=True)
-        _persist(lambda: shutil.rmtree(previous) if previous.exists() else None, 5.0)
+        for stale in (incoming, previous):  # from an update that was interrupted
+            _persist(lambda stale=stale: shutil.rmtree(stale) if stale.exists() else None, 5.0)
 
+        # The slow part first, while the old version is still whole and in its place.
+        try:
+            shutil.copytree(new_folder, incoming)
+        except OSError as problem:
+            say(f"copying the new version failed: {problem}")
+            _persist(lambda: shutil.rmtree(incoming) if incoming.exists() else None, retry_for)
+            outcome("failed: the new version could not be copied next to the old one.")
+            reopen()
+            return 1
+        # Then two renames, which take no time.
         problem = _persist(lambda: os.rename(folder, previous), retry_for)
         if problem is not None:
+            _persist(lambda: shutil.rmtree(incoming), retry_for)
             outcome("failed: the old version could not be moved aside "
                     f"(another program is using its folder: {problem}).")
             reopen()
             return 1
-        try:
-            shutil.copytree(new_folder, folder)
-        except OSError as problem:
-            say(f"copying the new version failed: {problem}")
-            _persist(lambda: shutil.rmtree(folder) if folder.exists() else None, retry_for)
+        problem = _persist(lambda: os.rename(incoming, folder), retry_for)
+        if problem is not None:
+            say(f"putting the new version in place failed: {problem}")
             _persist(lambda: os.rename(previous, folder), retry_for)
+            _persist(lambda: shutil.rmtree(incoming) if incoming.exists() else None, retry_for)
             outcome("failed: the new version could not be put in place, so the old one "
                     "was put back.")
             reopen()
@@ -276,6 +293,21 @@ def finish_update(pid: int, folder, staging, relaunch: bool, new_folder=None,
         return 1
     finally:
         log.close()
+
+
+def clear_leftovers(folder: Path | None) -> None:
+    """Remove what an interrupted update may have left beside the program's folder (a
+    copy that was still in use when the swap step gave up waiting to delete it). Done
+    in the background at start-up; it does not matter if it cannot be done yet."""
+    if folder is None:
+        return
+    stale = [folder.with_name(folder.name + suffix) for suffix in LEFTOVERS]
+    stale = [path for path in stale if path.exists()]
+    if stale:
+        import threading
+
+        threading.Thread(target=lambda: [shutil.rmtree(path, ignore_errors=True)
+                                         for path in stale], daemon=True).start()
 
 
 def finish_update_from_arguments(arguments: list[str]) -> int:

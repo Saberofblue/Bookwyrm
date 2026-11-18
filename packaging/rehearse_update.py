@@ -247,8 +247,11 @@ def main() -> int:
         code, said = update(installed, notice, work / "updated.txt")
         show(said)
         check(code == 0, "the update steps finished without complaint")
-        # The swap happens just after the old copy has exited.
-        check(wait_until(lambda: version_of(installed) == new_version, 240),
+        # The swap happens just after the old copy has exited. Wait for its note rather
+        # than trying the program meanwhile: that would get in the way of the swap.
+        check(wait_until((staging_folder() / "outcome.txt").exists, 300),
+              "the swap step reported back")
+        check(version_of(installed) == new_version,
               f"the installed copy now calls itself {new_version}")
         tested = subprocess.run([program(installed), "--self-test", str(work / "selftest.txt")],
                                 capture_output=True, text=True, timeout=600)
@@ -285,12 +288,12 @@ def main() -> int:
             started = staging_folder() / "started"
             code, said = update(second, notice, work / "relaunched.txt", relaunch=True)
             check(code == 0, "the update steps finished without complaint")
-            check(wait_until(lambda: version_of(second) == new_version, 240),
-                  f"the second copy now calls itself {new_version}")
-            check(wait_until(lambda: running_from(second), 120),
-                  "the new version was opened and is running")
+            check(wait_until(lambda: running_from(second), 300),
+                  "a copy of Bookwyrm was opened afterwards and is running")
             check(wait_until(started.exists, 120),
                   "it told the waiting update step that it had come up")
+            check(version_of(second) == new_version,
+                  f"the second copy now calls itself {new_version}")
             check(wait_until(
                 lambda: sorted(e.name for e in second.parent.iterdir()) == [APP], 120),
                 "the old copy was then cleared away")

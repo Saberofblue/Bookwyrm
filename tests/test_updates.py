@@ -617,7 +617,7 @@ def test_windows_swap_leaves_things_as_they_were_when_a_step_fails(tmp_path):
                                  retry_for=0.5) == 1
     assert version_in(old) == "1.0.0" and beside(old) == ["Bookwyrm"]
     worked, note = notes.take_outcome(staging)
-    assert not worked and "could not be put in place, so the old one was put back" in note
+    assert not worked and note == "the new version could not be copied next to the old one."
 
     gone = tmp_path / "Programs" / "Elsewhere"  # there is no folder to replace
     new = fake_folder(tmp_path / "staging" / "again", "2.0.0")
@@ -625,7 +625,25 @@ def test_windows_swap_leaves_things_as_they_were_when_a_step_fails(tmp_path):
                                  retry_for=0.5) == 1
     worked, note = notes.take_outcome(staging)
     assert not worked and "could not be moved aside" in note and not gone.exists()
+    assert beside(old) == ["Bookwyrm"]  # the copy made ready beside it was cleared away
     assert windows.finish_update_from_arguments(["12", "only", "three"]) == 2
+
+
+def test_windows_swap_clears_what_an_interrupted_update_left(tmp_path):
+    old, new, staging = swap_folders(tmp_path)
+    for suffix in windows.LEFTOVERS:  # as if an earlier swap had been cut short
+        leftover = old.with_name(old.name + suffix)
+        leftover.mkdir()
+        (leftover / "stale.txt").write_text("stale", "utf-8")
+    assert windows.finish_update(finished_pid(), old, staging, False, new_folder=new) == 0
+    assert version_in(old) == "2.0.0" and beside(old) == ["Bookwyrm"]
+    assert not (old / "stale.txt").exists()
+
+    for suffix in windows.LEFTOVERS:  # and the program itself tidies them when it starts
+        old.with_name(old.name + suffix).mkdir()
+    windows.clear_leftovers(old)
+    assert wait_for(lambda: beside(old) == ["Bookwyrm"])
+    windows.clear_leftovers(None)  # not a packaged program: nothing to do
 
 
 def test_windows_download_is_unpacked_and_recognised(tmp_path):
