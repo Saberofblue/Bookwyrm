@@ -14,7 +14,7 @@ import time
 import pytest
 from PySide6.QtWidgets import QDialog
 
-from bookwyrm.updates import mac, release, updater
+from bookwyrm.updates import mac, notes, release, updater, windows
 from bookwyrm.updates.fetch import CANCELLED, Fetcher
 from bookwyrm.updates.release import UpdateError
 from bookwyrm.updates.updater import Updater
@@ -240,18 +240,25 @@ def test_why_an_update_cannot_install_itself(qtbot, tmp_path, monkeypatch):
     with qtbot.waitSignal(checker.checked, timeout=5000):
         checker.check()
     reason = checker.blocked()
-    if MAC:
-        assert reason == "This release has no download for this kind of Mac."
+    if updater.backend_for() is None:  # neither a Mac nor Windows
+        assert "cannot install an update by itself" in reason
     else:
-        assert "cannot install an update by itself yet" in reason
+        assert reason == "This release has no download for this kind of computer."
     with qtbot.waitSignal(checker.failed, timeout=5000) as heard:
         checker.prepare()  # refused, with the same reason
     assert heard.args == [reason] and not (tmp_path / "staging").exists()
-    assert "source code" in mac.why_not(None)
+    assert "source code" in mac.why_not(None) and "source code" in windows.why_not(None)
     moved = tmp_path / "AppTranslocation" / "X" / "d" / "Bookwyrm.app"
     assert "Applications folder" in mac.why_not(moved)
     with pytest.raises(UpdateError):
         checker.install()  # nothing has been prepared
+    assert updater.backend_for("darwin") is mac and updater.backend_for("win32") is windows
+    assert updater.backend_for("linux") is None
+    elsewhere = Updater(current="1.0.0", staging=tmp_path / "staging", bundle=None,
+                        backend=None)
+    with qtbot.waitSignal(elsewhere.checked, timeout=5000):
+        elsewhere.check()
+    assert "cannot install an update by itself" in elsewhere.blocked()
 
 
 # -- fetching and proving the new version (Mac) ---------------------------------------------------
@@ -456,6 +463,282 @@ def test_the_outcome_is_reported_once_and_abandoned_downloads_are_cleared(tmp_pa
     assert updater.take_outcome(staging) == (False, "the old version could not be moved aside.")
     assert sorted(p.name for p in staging.iterdir()) == [mac.STARTED]
     assert updater.take_outcome(staging) is None
+
+
+# -- Windows: the program is a folder, and the new version puts itself in place ----------------
+
+
+POSIX = os.name == "posix"
+posix_only = pytest.mark.skipif(not POSIX, reason="the stand-in program is a shell script")
+
+
+def fake_folder(parent, version, passes=True, says=None):
+    """A stand-in for the Bookwyrm folder of the Windows download."""
+    folder = parent / "Bookwyrm"
+    (folder / "_internal").mkdir(parents=True)
+    (folder / "_internal" / "library.bin").write_bytes(b"\0" * 2048)
+    (folder / "which").write_text(version, "utf-8")
+    verdict = "RESULT: all 10 checks passed" if passes else "RESULT: 1 of 10 checks FAILED"
+    code = 0 if passes else 1
+    program = folder / windows.EXE
+    program.write_text(
+        "#!/bin/sh\n"
+        f'if [ "$1" = "--version" ]; then echo "{says or version}" > "$2"; exit 0; fi\n'
+        f'if [ "$1" = "--self-test" ]; then echo "{verdict}" > "$2"; exit {code}; fi\n',
+        "utf-8")
+    program.chmod(0o755)
+    return folder
+
+
+def version_in(folder) -> str:
+    return (folder / "which").read_text("utf-8")
+
+
+def zipped_folder(folder, target):
+    import shutil
+
+    made = shutil.make_archive(str(target)[:-4], "zip", folder.parent, folder.name)
+    assert made == str(target)
+    return target
+
+
+class Program:
+    """Stands in for a started program: `alive` is what poll() reports on."""
+
+    def __init__(self, alive: bool):
+        self.alive = alive
+
+    def poll(self):
+        return None if self.alive else 0
+
+
+def swap_folders(tmp_path):
+    old = fake_folder(tmp_path / "Programs", "1.0.0")
+    new = fake_folder(tmp_path / "staging" / "new", "2.0.0")
+    return old, new, tmp_path / "staging"
+
+
+def beside(folder) -> list[str]:
+    return sorted(entry.name for entry in folder.parent.iterdir())
+
+
+def test_windows_swap_replaces_the_folder_and_keeps_its_place(tmp_path):
+    old, new, staging = swap_folders(tmp_path)
+    (old / "left-behind.txt").write_text("from the old version", "utf-8")
+    assert windows.finish_update(finished_pid(), old, staging, False, new_folder=new) == 0
+    assert version_in(old) == "2.0.0" and not (old / "left-behind.txt").exists()
+    assert (old / "_internal" / "library.bin").stat().st_size == 2048
+    assert beside(old) == ["Bookwyrm"]  # the old copy is gone, nothing else is left
+    assert notes.take_outcome(staging) == (True, "installed")
+    assert "waiting for Bookwyrm" in (staging / "swap.log").read_text("utf-8")
+
+
+def test_waiting_for_another_program_to_end():
+    import threading
+
+    lingering = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2.5)"])
+    # Collect it as soon as it ends, as the system does for a program that is not this
+    # test's own child (an uncollected child still counts as running on a Mac).
+    reaper = threading.Thread(target=lingering.wait)
+    reaper.start()
+    try:
+        assert windows.wait_gone(lingering.pid, 0.4) is False  # still there
+        assert windows.wait_gone(lingering.pid, 30) is True
+    finally:
+        reaper.join()
+    assert windows.wait_gone(finished_pid(), 1) is True  # never keeps waiting for the gone
+
+
+def test_windows_swap_is_not_made_while_bookwyrm_is_still_open(tmp_path):
+    old, new, staging = swap_folders(tmp_path)
+    lingering = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(20)"])
+    try:
+        assert windows.finish_update(lingering.pid, old, staging, False, new_folder=new,
+                                     wait_for_exit=0.5) == 1
+    finally:
+        lingering.kill()
+        lingering.wait()
+    assert version_in(old) == "1.0.0" and beside(old) == ["Bookwyrm"]
+    worked, note = notes.take_outcome(staging)
+    assert not worked and note == "Bookwyrm did not close, so it was left as it is."
+
+
+def test_windows_swap_starts_the_new_version_and_keeps_it_when_it_comes_up(tmp_path):
+    old, new, staging = swap_folders(tmp_path)
+    started = []
+
+    def comes_up(exe):
+        started.append(exe)
+        notes.mark_started(staging)  # as the new version does once its window is up
+        return Program(alive=True)
+
+    assert windows.finish_update(finished_pid(), old, staging, True, new_folder=new,
+                                 start=comes_up, patience=4) == 0
+    assert started == [old / windows.EXE] and version_in(old) == "2.0.0"
+    assert beside(old) == ["Bookwyrm"]
+
+    old2, new2, staging2 = swap_folders(tmp_path / "second")  # running, but leaves no note
+    assert windows.finish_update(finished_pid(), old2, staging2, True, new_folder=new2,
+                                 start=lambda exe: Program(alive=True), patience=1) == 0
+    assert version_in(old2) == "2.0.0" and beside(old2) == ["Bookwyrm"]
+
+
+def test_windows_swap_puts_the_old_version_back_when_the_new_one_does_not_start(tmp_path):
+    old, new, staging = swap_folders(tmp_path)
+    started = []
+
+    def dies(exe):
+        started.append(version_in(exe.parent))
+        return Program(alive=False)
+
+    assert windows.finish_update(finished_pid(), old, staging, True, new_folder=new,
+                                 start=dies, patience=2) == 1
+    assert version_in(old) == "1.0.0" and beside(old) == ["Bookwyrm"]
+    assert started == ["2.0.0", "1.0.0"]  # the new one was tried, then the old one reopened
+    worked, note = notes.take_outcome(staging)
+    assert not worked and note == "the new version did not start, so the old one was put back."
+
+    def cannot_start(exe):
+        raise OSError("blocked by a virus scanner")
+
+    old3, new3, staging3 = swap_folders(tmp_path / "third")
+    assert windows.finish_update(finished_pid(), old3, staging3, True, new_folder=new3,
+                                 start=cannot_start, patience=2) == 1
+    assert version_in(old3) == "1.0.0"
+
+
+def test_windows_swap_leaves_things_as_they_were_when_a_step_fails(tmp_path):
+    old, new, staging = swap_folders(tmp_path)
+    import shutil
+
+    shutil.rmtree(new)  # the new version has vanished: nothing to copy
+    assert windows.finish_update(finished_pid(), old, staging, False, new_folder=new,
+                                 retry_for=0.5) == 1
+    assert version_in(old) == "1.0.0" and beside(old) == ["Bookwyrm"]
+    worked, note = notes.take_outcome(staging)
+    assert not worked and "could not be put in place, so the old one was put back" in note
+
+    gone = tmp_path / "Programs" / "Elsewhere"  # there is no folder to replace
+    new = fake_folder(tmp_path / "staging" / "again", "2.0.0")
+    assert windows.finish_update(finished_pid(), gone, staging, False, new_folder=new,
+                                 retry_for=0.5) == 1
+    worked, note = notes.take_outcome(staging)
+    assert not worked and "could not be moved aside" in note and not gone.exists()
+    assert windows.finish_update_from_arguments(["12", "only", "three"]) == 2
+
+
+def test_windows_download_is_unpacked_and_recognised(tmp_path):
+    archive = zipped_folder(fake_folder(tmp_path / "built", "2.0.0"),
+                            tmp_path / "Bookwyrm-windows.zip")
+    done = subprocess.run([sys.executable, "-m", "bookwyrm", "--unpack", str(archive),
+                           str(tmp_path / "out")], capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    app = windows.find_app(tmp_path / "out")
+    assert app == tmp_path / "out" / "Bookwyrm" and version_in(app) == "2.0.0"
+    assert windows.executable_of(app) == app / "Bookwyrm.exe"
+    if POSIX:
+        assert os.access(app / windows.EXE, os.X_OK)  # still a program that can be run
+    command = windows.unpack_command(archive, tmp_path / "out")
+    assert command[-3:] == ["--unpack", str(archive), str(tmp_path / "out")]
+    (tmp_path / "empty").mkdir()
+    (tmp_path / "two" / "A").mkdir(parents=True)
+    (tmp_path / "two" / "B").mkdir()
+    for name in ("A", "B"):
+        (tmp_path / "two" / name / windows.EXE).write_text("", "utf-8")
+    for folder in ("empty", "two"):
+        with pytest.raises(UpdateError):
+            windows.find_app(tmp_path / folder)
+
+    import zipfile
+
+    sly = tmp_path / "sly.zip"  # an entry that tries to land outside the folder
+    with zipfile.ZipFile(sly, "w") as bundle:
+        bundle.writestr("../../escaped.txt", "out")
+        bundle.writestr("Bookwyrm/inside.txt", "in")
+    windows.unpack(str(sly), str(tmp_path / "deep" / "er" / "target"))
+    assert not (tmp_path / "escaped.txt").exists() and not (tmp_path / "deep" / "escaped.txt"
+                                                             ).exists()
+    assert (tmp_path / "deep" / "er" / "target" / "Bookwyrm" / "inside.txt").exists()
+
+
+def test_where_bookwyrm_may_replace_itself_on_windows(tmp_path):
+    folder = fake_folder(tmp_path / "Documents", "1.0.0")
+    assert windows.why_not(folder) is None
+    for unpacked_by in ("Temp1_Bookwyrm-windows.zip", "7zO4A1B2C3D", "Rar$EXa1234.5678"):
+        inside_zip = tmp_path / "AppData" / "Local" / "Temp" / unpacked_by / "Bookwyrm"
+        assert "inside the zip it came in" in windows.why_not(inside_zip)
+    assert "not allowed to change the folder" in windows.why_not(tmp_path / "nowhere" / "B")
+    assert windows.installed_path(str(folder / windows.EXE), frozen=True) == folder
+    assert windows.installed_path(str(folder / windows.EXE), frozen=False) is None
+
+
+def test_the_finishing_step_is_started_with_its_fixed_arguments(tmp_path, monkeypatch):
+    old, new, staging = swap_folders(tmp_path)
+    notes.write_outcome(staging, "installed")  # left from some earlier update
+    calls = []
+    monkeypatch.setattr(windows.subprocess, "Popen",
+                        lambda command, **options: calls.append((command, options)) or "process")
+    assert windows.start_swap(old, new, staging, relaunch=True, pid=4321) == "process"
+    command, options = calls[0]
+    assert command == [str(new / windows.EXE), "--finish-update", "4321", str(old),
+                       str(staging), "relaunch"]
+    assert options["cwd"] == str(staging)  # never inside the folder about to be moved
+    assert not (staging / notes.OUTCOME).exists()
+    windows.start_swap(old, new, staging, relaunch=False)
+    assert calls[1][0][2] == str(os.getpid()) and calls[1][0][-1] == "stay"
+
+    def refuse(command, **options):
+        raise OSError("not allowed")
+
+    monkeypatch.setattr(windows.subprocess, "Popen", refuse)
+    with pytest.raises(UpdateError):
+        windows.start_swap(old, new, staging)
+
+
+@posix_only
+def test_update_the_windows_way_is_fetched_proven_and_swapped_in(qtbot, tmp_path, monkeypatch):
+    installed = fake_folder(tmp_path / "Programs", "1.0.0")
+    archive = zipped_folder(fake_folder(tmp_path / "built", "2.0.0"),
+                            tmp_path / "Bookwyrm-windows.zip")
+    monkeypatch.setenv(release.FEED_VARIABLE, str(
+        write_feed(tmp_path, "2.0.0", archive, name="Bookwyrm-windows.zip")))
+    updating = Updater(current="1.0.0", staging=tmp_path / "staging", bundle=installed,
+                       backend=windows)
+    with qtbot.waitSignal(updating.checked, timeout=5000):
+        updating.check()
+    assert updating.blocked() is None
+    with qtbot.waitSignal(updating.ready, timeout=60000):
+        updating.prepare()
+    new = tmp_path / "staging" / "new" / "Bookwyrm"
+    assert updating.is_ready and version_in(new) == "2.0.0" and version_in(installed) == "1.0.0"
+    assert windows.finish_update(finished_pid(), installed, tmp_path / "staging", False,
+                                 new_folder=new) == 0  # what the new version then does
+    assert version_in(installed) == "2.0.0"
+    assert updater.take_outcome(tmp_path / "staging") == (True, "installed")
+
+
+@posix_only
+@pytest.mark.parametrize("fault, words", [
+    ("selftest", "did not pass its own checks"), ("version", "did not start properly"),
+    ("empty", "did not contain Bookwyrm"),
+])
+def test_a_bad_windows_download_is_refused(qtbot, tmp_path, monkeypatch, fault, words):
+    installed = fake_folder(tmp_path / "Programs", "1.0.0")
+    built = fake_folder(tmp_path / "built", "2.0.0", passes=fault != "selftest",
+                        says="1.5.0" if fault == "version" else None)
+    if fault == "empty":
+        (built / windows.EXE).unlink()
+    archive = zipped_folder(built, tmp_path / "Bookwyrm-windows.zip")
+    monkeypatch.setenv(release.FEED_VARIABLE, str(
+        write_feed(tmp_path, "2.0.0", archive, name="Bookwyrm-windows.zip")))
+    updating = Updater(current="1.0.0", staging=tmp_path / "staging", bundle=installed,
+                       backend=windows)
+    with qtbot.waitSignal(updating.checked, timeout=5000):
+        updating.check()
+    with qtbot.waitSignal(updating.failed, timeout=60000) as heard:
+        updating.prepare()
+    assert words in heard.args[0]
+    assert version_in(installed) == "1.0.0" and not (tmp_path / "staging").exists()
 
 
 # -- the window ----------------------------------------------------------------------------------

@@ -45,6 +45,16 @@ def main() -> int:
             with open(argv[2], "w", encoding="utf-8") as report:
                 report.write(__version__ + "\n")
         return 0
+    if len(argv) == 4 and argv[1] == "--unpack":  # a step of an update, on Windows
+        from bookwyrm.updates.windows import unpack
+
+        return unpack(argv[2], argv[3])
+    if len(argv) >= 2 and argv[1] == "--finish-update":
+        # The last step of an update on Windows: this (new) version puts itself in place
+        # of the old one. Its arguments are fixed; see updates/windows.py.
+        from bookwyrm.updates.windows import finish_update_from_arguments
+
+        return finish_update_from_arguments(argv[2:])
     if len(argv) >= 2 and argv[1] in ("--check-updates", "--update"):
         # The update steps without a window. --update installs a newer version if there
         # is one; add --no-relaunch to leave the new version unopened. A file name, if

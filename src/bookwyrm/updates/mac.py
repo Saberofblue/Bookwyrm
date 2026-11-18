@@ -17,11 +17,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+from bookwyrm.updates.notes import (  # noqa: F401  (also used through this module)
+    INSTALLED,
+    OUTCOME,
+    STARTED,
+    mark_started,
+    take_outcome,
+)
 from bookwyrm.updates.release import UpdateError
 
+SYSTEM = "darwin"  # the kind of download this module installs (see release.asset_name)
 BUNDLE_ID = "org.bookwyrm.Bookwyrm"
-OUTCOME, STARTED = "outcome.txt", "started"
-INSTALLED = "installed"  # the outcome note left when the swap went through
 
 SWAP_SCRIPT = r"""#!/bin/sh
 # Bookwyrm's update step. Bookwyrm starts this and then quits. It waits for that, puts
@@ -118,6 +124,9 @@ def bundle_path(executable: str | None = None, frozen: bool | None = None) -> Pa
     return next((parent for parent in path.parents if parent.suffix == ".app"), None)
 
 
+installed_path = bundle_path  # the name every system's module gives this
+
+
 def why_not(bundle: Path | None) -> str | None:
     """Why Bookwyrm cannot replace itself here, or None if it can."""
     if bundle is None:
@@ -184,26 +193,3 @@ def start_swap(bundle: Path, new_bundle: Path, staging: Path, relaunch: bool = T
         raise UpdateError(f"The update could not be started: {problem}") from problem
     finally:
         log.close()
-
-
-def take_outcome(staging: Path) -> tuple[bool, str] | None:
-    """What the last swap left to say, if anything: (it worked, the note). Reading it
-    removes it, so it is reported once."""
-    note = Path(staging) / OUTCOME
-    try:
-        text = note.read_text("utf-8").strip()
-        note.unlink()
-    except OSError:
-        return None
-    if not text:
-        return None
-    return (text == INSTALLED, text.removeprefix("failed:").strip())
-
-
-def mark_started(staging: Path) -> None:
-    """Tell a waiting swap script that this version has come up."""
-    try:
-        if Path(staging).is_dir():
-            (Path(staging) / STARTED).write_text("", "utf-8")
-    except OSError:
-        pass

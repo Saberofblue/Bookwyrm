@@ -20,6 +20,17 @@ TO START
 Nothing needs installing, and nothing is added to Windows outside this folder.
 
 
+UPDATING
+
+Open "Settings" (under the list of bookcases) and click "Check for Updates". If a
+newer version exists, "Update and Restart" downloads it, checks it, and puts it in
+place of this one; Bookwyrm closes and opens again as the new version. Your library
+is not touched, and shortcuts you made keep working. Bookwyrm only looks for updates
+when you click that button.
+
+If the new version will not start, the old one is put back automatically.
+
+
 IF SOMETHING GOES WRONG
 
 Bookwyrm is new on Windows, so a hiccup is possible, and a report from you is

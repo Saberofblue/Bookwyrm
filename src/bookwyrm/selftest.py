@@ -131,6 +131,15 @@ def _run_checks(report: Report, work: Path) -> None:
             raise RuntimeError(f"the bundled fonts did not load (using {fonts})")
         return f"fonts {fonts}, platform plugin {state['app'].platformName()}"
 
+    def secure_downloads():
+        # Updates are fetched over a secure connection, which needs a piece of Qt that a
+        # packaged build could leave out. Nothing is contacted here.
+        from PySide6.QtNetwork import QSslSocket
+        if not QSslSocket.supportsSsl():
+            raise RuntimeError("secure connections are not available "
+                               f"(found: {QSslSocket.availableBackends()})")
+        return f"through {QSslSocket.activeBackend()}"
+
     def catalogue():
         from bookwyrm.db.repo import Library
         library = Library(work / "library")
@@ -247,6 +256,7 @@ def _run_checks(report: Report, work: Path) -> None:
             return
         if not report.check("window toolkit, fonts and icons", window_toolkit):
             return
+        report.check("secure connections, for updates", secure_downloads)
         if not report.check("catalogue database", catalogue):
             return
         if report.check("import helper: copy, cover, text search", import_and_search):

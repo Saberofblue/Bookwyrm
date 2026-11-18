@@ -22,9 +22,10 @@ def test_self_test_passes_and_writes_a_report(tmp_path):
                           capture_output=True, text=True, timeout=180)
     assert done.returncode == 0, done.stdout + done.stderr
     text = report.read_text("utf-8")
-    assert "RESULT: all 9 checks passed" in text
-    assert text.count("[ OK ]") == 9 and "[FAIL]" not in text
+    assert "RESULT: all 10 checks passed" in text
+    assert text.count("[ OK ]") == 10 and "[FAIL]" not in text
     assert "edit, undo, redo and save" in text
+    assert "secure connections, for updates" in text
 
 
 def test_self_test_reports_a_failure_instead_of_crashing(monkeypatch, capsys):

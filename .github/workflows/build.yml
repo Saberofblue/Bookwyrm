@@ -1,5 +1,6 @@
-# Tests Bookwyrm on Windows and on a Mac and builds the program for each. On Windows it
-# also rehearses the one-click install; on the Mac it rehearses the app updating itself.
+# Tests Bookwyrm on Windows and on a Mac and builds the program for each. On both it
+# rehearses the program updating itself (packaging/rehearse_update.py), and on Windows
+# also the one-click install from source.
 # Runs on every push and on demand (Actions tab -> "Build Bookwyrm" -> Run workflow).
 # The finished programs appear as downloadable artifacts on the run's page. A release
 # is made from them by hand; its files must keep the names they have here, because
@@ -46,7 +47,10 @@ jobs:
         run: |
           dist/Bookwyrm.app/Contents/MacOS/Bookwyrm --version
           dist/Bookwyrm.app/Contents/MacOS/Bookwyrm --self-test
-          python packaging/rehearse_update.py
+          python packaging/rehearse_update.py --with-relaunch
+      - name: Rehearse the built program updating itself
+        if: runner.os == 'Windows'
+        run: python packaging/rehearse_update.py --with-relaunch
       - name: Make the Windows source package
         if: runner.os == 'Windows'
         run: python packaging/make_windows_package.py

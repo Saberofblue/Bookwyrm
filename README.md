@@ -22,10 +22,10 @@ move everything there, or switch to a library that is already there.
 
 **Updating.** Settings has a **Check for Updates** button (also under Help, or in the
 Bookwyrm menu on a Mac). Bookwyrm asks GitHub for its newest release only when you press
-it; nothing about your library is sent. On a Mac, **Update and Restart** then downloads
-the new version, checks it against the release's checksum, makes sure it runs, and puts
-it in place of the old one; if the new version fails to start, the old one is put back.
-On Windows the button opens the download page for now.
+it; nothing about your library is sent. **Update and Restart** then downloads the new
+version, checks it against the release's checksum, makes sure it runs, and puts it in
+place of the old one; if the new version fails to start, the old one is put back. On
+Windows the Bookwyrm folder stays where it is, so shortcuts keep working.
 
 A newer Bookwyrm upgrades a library's catalogue the first time it opens it, and older
 versions cannot open it afterwards. A copy of the catalogue as it was is kept in the

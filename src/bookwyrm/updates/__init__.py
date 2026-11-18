@@ -3,6 +3,8 @@
     release.py   what a release is, whether it is newer, which download suits this computer
     fetch.py     reading the release notice and downloading a file (QtNetwork)
     mac.py       putting a new version in place of the running one on a Mac
+    windows.py   the same on Windows
+    notes.py     the two notes an update leaves for the next start of Bookwyrm
     updater.py   the steps in order: check, download, verify, try the new version, swap
 
 Nothing here runs unless the user asks for it ("Check for Updates"). The only places

@@ -19,11 +19,18 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QStandardPaths, QTimer, Signal
 
 from bookwyrm import __version__
-from bookwyrm.updates import mac, release
+from bookwyrm.updates import mac, notes, release, windows
 from bookwyrm.updates.fetch import CANCELLED, Fetcher
 from bookwyrm.updates.release import Release, UpdateError
 
 ARCHIVE, UNPACKED = "download.zip", "new"
+
+
+def backend_for(system: str | None = None):
+    """The module that knows how Bookwyrm is installed and replaced on a system, or None
+    where Bookwyrm cannot replace itself."""
+    system = sys.platform if system is None else system
+    return mac if system == "darwin" else windows if system == "win32" else None
 
 
 def default_staging() -> Path:
@@ -38,13 +45,18 @@ class Updater(QObject):
     progressed = Signal(str, int, int)  # what is being done; bytes done and expected (0 = n/a)
     ready = Signal()  # the new version is here, tested and waiting for install()
 
-    def __init__(self, current: str | None = None, staging=None, bundle=..., parent=None):
+    def __init__(self, current: str | None = None, staging=None, bundle=..., parent=None,
+                 backend=...):
         super().__init__(parent)
         self.current = current or __version__
         self.source = release.source()
         self.staging = Path(staging) if staging else default_staging()
-        # The app to replace. Tests pass one; normally it is the app this process runs from.
-        self.bundle: Path | None = mac.bundle_path() if bundle is ... else bundle
+        self.backend = backend_for() if backend is ... else backend
+        # The app to replace: Bookwyrm.app on a Mac, the Bookwyrm folder on Windows. Tests
+        # pass one; normally it is the one this process runs from.
+        if bundle is ...:
+            bundle = self.backend.installed_path() if self.backend else None
+        self.bundle: Path | None = bundle
         self.latest: Release | None = None  # the newest release, once check() has heard
         self.fetcher = Fetcher(self)
         # Methods, not closures over `self`, for the reason given in fetch.Fetcher.
@@ -85,12 +97,15 @@ class Updater(QObject):
         itself, or None if it can. (The release can still be downloaded by hand.)"""
         if self.latest is None:
             return "Check for updates first."
-        if sys.platform != "darwin":
-            return ("On this system Bookwyrm cannot install an update by itself yet. "
+        if self.backend is None:
+            return ("On this system Bookwyrm cannot install an update by itself. "
                     "Download the new version from its page.")
-        if release.asset_for(self.latest) is None:
-            return "This release has no download for this kind of Mac."
-        return mac.why_not(self.bundle)
+        if self._asset() is None:
+            return "This release has no download for this kind of computer."
+        return self.backend.why_not(self.bundle)
+
+    def _asset(self):
+        return release.asset_for(self.latest, self.backend.SYSTEM)
 
     # -- fetching and proving the new version -------------------------------------------
 
@@ -101,7 +116,7 @@ class Updater(QObject):
         if reason:
             self.failed.emit(reason)
             return
-        asset = release.asset_for(self.latest)
+        asset = self._asset()
         try:
             shutil.rmtree(self.staging, ignore_errors=True)
             self.staging.mkdir(parents=True, exist_ok=True)
@@ -127,7 +142,7 @@ class Updater(QObject):
         if problem:
             self._stop("" if problem == CANCELLED else problem)
             return
-        asset = release.asset_for(self.latest)
+        asset = self._asset()
         archive = self.staging / ARCHIVE
         self.progressed.emit("Checking the download", 0, 0)
         try:
@@ -145,7 +160,7 @@ class Updater(QObject):
         target = self.staging / UNPACKED
         shutil.rmtree(target, ignore_errors=True)
         target.mkdir(parents=True)
-        command = mac.unpack_command(archive, target)
+        command = self.backend.unpack_command(archive, target)
         self._run(command[0], command[1:], 300)
 
     def _run(self, program: str, arguments: list[str], seconds: int) -> None:
@@ -180,24 +195,24 @@ class Updater(QObject):
                 if code != 0:
                     raise UpdateError("The download could not be unpacked.")
                 (self.staging / ARCHIVE).unlink(missing_ok=True)
-                self._new_bundle = mac.find_app(self.staging / UNPACKED)
+                self._new_bundle = self.backend.find_app(self.staging / UNPACKED)
                 self._stage = "version"
                 self.progressed.emit("Trying the new version", 0, 0)
-                self._run(str(mac.executable_of(self._new_bundle)),
+                self._run(str(self.backend.executable_of(self._new_bundle)),
                           ["--version", str(self.staging / "version.txt")], 90)
             elif stage == "version":
                 told = self._read("version.txt")
                 if code != 0 or told != self.latest.version:
                     raise UpdateError(
-                        "The downloaded program did not start properly on this Mac"
+                        "The downloaded program did not start properly on this computer"
                         + (f" (it calls itself version {told})." if told else "."))
                 self._stage = "selftest"
-                self._run(str(mac.executable_of(self._new_bundle)),
+                self._run(str(self.backend.executable_of(self._new_bundle)),
                           ["--self-test", str(self.staging / "selftest.txt")], 300)
             elif stage == "selftest":
                 if code != 0 or "RESULT: all" not in self._read("selftest.txt"):
                     raise UpdateError(
-                        "The new version did not pass its own checks on this Mac, so it "
+                        "The new version did not pass its own checks on this computer, so it "
                         "was not installed. You are still on version "
                         f"{self.current}.")
                 self._stage = ""
@@ -246,8 +261,8 @@ class Updater(QObject):
         changed then)."""
         if not self.is_ready or self._new_bundle is None or self.bundle is None:
             raise UpdateError("The new version is not ready to install.")
-        self._swapper = mac.start_swap(self.bundle, self._new_bundle, self.staging, relaunch,
-                                       pid)
+        self._swapper = self.backend.start_swap(self.bundle, self._new_bundle, self.staging,
+                                                relaunch, pid)
 
     def call_off(self) -> None:
         """Stop a swap that is waiting for this process to end (the user chose not to quit)."""
@@ -260,8 +275,8 @@ def take_outcome(staging=None) -> tuple[bool, str] | None:
     """After a restart: what the update left to say, once. Also tells a waiting swap that
     this version came up."""
     staging = Path(staging) if staging else default_staging()
-    outcome = mac.take_outcome(staging)
-    mac.mark_started(staging)
+    outcome = notes.take_outcome(staging)
+    notes.mark_started(staging)
     for leftover in (ARCHIVE, UNPACKED):  # a download that was fetched but never installed
         path = staging / leftover
         if path.is_dir():
