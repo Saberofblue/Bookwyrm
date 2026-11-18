@@ -185,7 +185,8 @@ def write_feed(folder, version, archive=None, digest=None, name=None):
 
 
 def finished_pid() -> int:
-    process = subprocess.Popen(["/usr/bin/true"])
+    """The process id of a program that has already ended."""
+    process = subprocess.Popen([sys.executable, "-c", "pass"])
     process.wait()
     return process.pid
 

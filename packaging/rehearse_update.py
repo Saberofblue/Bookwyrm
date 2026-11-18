@@ -210,7 +210,9 @@ def main() -> int:
         raise SystemExit(f"Build first: {archive} is missing (packaging/build.py --zip).")
     new_version = current_version()
     checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
-    work = Path(tempfile.mkdtemp(prefix="bookwyrm-update-rehearsal-"))
+    # Resolved, so that paths here read as the system reports them for running programs
+    # (a Mac's temporary folder is reached through a link).
+    work = Path(tempfile.mkdtemp(prefix="bookwyrm-update-rehearsal-")).resolve()
     failures: list[str] = []
 
     def check(condition: bool, what: str) -> None:
@@ -264,6 +266,18 @@ def main() -> int:
         log = staging_folder() / "swap.log"
         if log.exists():
             show(log.read_text("utf-8", errors="replace"))
+
+        say("Asking GitHub, as the Check for Updates button does:")
+        asked = work / "asked.txt"
+        subprocess.run([program(installed), "--check-updates", str(asked)],
+                       capture_output=True, timeout=180)
+        heard = asked.read_text("utf-8") if asked.exists() else ""
+        show(heard)
+        # A busy network may be told to wait by GitHub; that is still an answer, received
+        # over a secure connection, which is what a packaged build has to prove here.
+        check(any(words in heard for words in ("is the newest version", "is available",
+                                               "not answering requests from this network")),
+              "the packaged program reached GitHub over a secure connection")
 
         if with_relaunch:
             say("Once more, letting the new version open as it does for a person:")
